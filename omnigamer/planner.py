@@ -236,14 +236,21 @@ class GoalPlanner:
             validated.append(step)
         return GoalPlan(steps=validated)
 
-    def plan(self, *, frame, goal, profile, outcome_summary=(), failure="", timeout_seconds=None):
+    def signature(self, plan):
+        """Return normalized skill/argument pairs for detecting exact plan repeats."""
+        return tuple((step.skill, json.dumps(
+            self.registry.get(step.skill).validate_args(step.args).model_dump(mode="json"),
+            sort_keys=True, separators=(",", ":"))) for step in plan.steps)
+
+    def plan(self, *, frame, goal, profile, outcome_summary=(), failure="", timeout_seconds=None,
+             avoid_plan=None, failed_step=None):
         error = ""
         deadline = None if timeout_seconds is None else time.monotonic() + max(0.0, timeout_seconds)
         for attempt in range(self.max_validation_retries + 1):
             request = dict(frame=frame, goal=goal, profile=profile,
-                                    skills=self._profile_catalog(profile),
-                                    outcome_summary=list(outcome_summary),
-                                    validation_error=error if attempt else failure)
+                           skills=self._profile_catalog(profile),
+                           outcome_summary=list(outcome_summary),
+                           validation_error=error if attempt else failure)
             if deadline is not None:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
@@ -251,7 +258,17 @@ class GoalPlanner:
                 request["timeout_seconds"] = remaining
             raw = self.request_plan(**request)
             try:
-                return self.validate(raw, profile=profile)
+                plan = self.validate(raw, profile=profile)
+                signature = self.signature(plan)
+                if avoid_plan is not None and signature == avoid_plan:
+                    raise ValueError("Plan exactly repeats the previous failed plan; choose a different strategy.")
+                if failed_step is not None and plan.steps:
+                    failed_name, failed_args = failed_step
+                    first = plan.steps[0]
+                    first_args = self.registry.get(first.skill).validate_args(first.args).model_dump(mode="json")
+                    if first.skill == failed_name and first_args == failed_args:
+                        raise ValueError("Plan starts by repeating the immediately failed skill with identical arguments.")
+                return plan
             except (ValidationError, ValueError, TypeError) as exc:
                 error = str(exc)
         raise PlanningError(f"Planner returned an invalid plan after {self.max_validation_retries + 1} request(s): {error}")
@@ -381,6 +398,7 @@ class GoalExecutor:
 
     def run(self, goal):
         started, steps_used, replans, failure = self.clock(), 0, 0, ""
+        avoid_plan, failed_step = None, None
         while True:
             if self.input_action_budget is not None and self.input_action_budget.exhausted:
                 return self._finish({"status": "FAILED", "reason": "max_actions", "steps": steps_used})
@@ -391,9 +409,17 @@ class GoalExecutor:
             if plan_budget <= 0:
                 return self._finish({"status": "FAILED", "reason": "max_run_seconds", "steps": steps_used})
             frame = self.frame_provider()
-            plan = self.planner.plan(frame=frame, goal=goal, profile=self.profile,
-                                     outcome_summary=self.store.summary(self.game_id), failure=failure,
-                                     timeout_seconds=plan_budget)
+            try:
+                plan = self.planner.plan(frame=frame, goal=goal, profile=self.profile,
+                                         outcome_summary=self.store.summary(self.game_id), failure=failure,
+                                         timeout_seconds=plan_budget, avoid_plan=avoid_plan,
+                                         failed_step=failed_step)
+            except PlanningError as exc:
+                prior_failure = f"; previous_failure={failure}" if failure else ""
+                return self._finish({"status": "FAILED",
+                                     "reason": f"planner_validation_failed{prior_failure}: {exc}",
+                                     "steps": steps_used})
+            current_plan_signature = self.planner.signature(plan)
             if self.logger:
                 self.logger({"event": "plan", "replan_index": replans, "goal": goal,
                              "steps": [step.model_dump(mode="json") for step in plan.steps]})
@@ -479,6 +505,8 @@ class GoalExecutor:
                         if recovered:
                             result = recovered
                     failure = f"{step.skill}: {status}: {result.get('reason', '')}; expected={step.expected_result}; check={step.success_check}"
+                    avoid_plan = current_plan_signature
+                    failed_step = (step.skill, params)
                     break
             else:
                 return self._finish({"status": "DRY_RUN" if self.dry_run else "SUCCESS",

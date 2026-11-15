@@ -91,6 +91,35 @@ class GoalPlannerTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertIn("Unknown skill", calls[1]["validation_error"])
 
+    def test_replan_rejects_same_failed_plan_before_execution(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = SkillOutcomeStore(Path(temp) / "outcomes.db")
+            repeated = plan_for()
+            alternative = plan_for(args={"direction": "backward", "seconds": 0.5})
+            requests = []
+            responses = [repeated, repeated, alternative]
+
+            def request(**kwargs):
+                requests.append(kwargs)
+                return responses.pop(0)
+
+            planner = GoalPlanner(self.registry, request)
+            executions = []
+
+            def execute(spec, args, _remaining):
+                executions.append((spec.name, args["direction"]))
+                if len(executions) == 1:
+                    return SkillResult(status=SkillStatus.FAILED, result_code="FAILED", reason="no_effect")
+                return SkillResult(status=SkillStatus.SUCCESS, result_code="SUCCESS", reason="moved")
+
+            runner = GoalExecutor(planner, self.registry, store, profile=self.profile, game_id="sim",
+                execute_skill=execute, frame_provider=lambda: object(), stop_check=lambda: None,
+                max_replans=1)
+            result = runner.run("move")
+            self.assertEqual(result["status"], "SUCCESS")
+            self.assertEqual(executions, [("move_pulse", "forward"), ("move_pulse", "backward")])
+            self.assertIn("exactly repeats", requests[2]["validation_error"])
+
     def test_profile_actions_and_regions_are_schema_constrained(self):
         self.profile.actions = {"primary_hold": {"kind": "mouse", "value": "left"},
                                 "interact": {"kind": "mouse", "value": "right"}}
