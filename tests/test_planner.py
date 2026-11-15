@@ -227,6 +227,31 @@ class GoalPlannerTests(unittest.TestCase):
             example = store.summary("sim")[0]["verified_example"]
             self.assertEqual(example["args"], {"direction": "left", "amount": 20})
 
+    def test_legacy_success_rows_survive_migration_without_becoming_examples(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "legacy.db"
+            with closing(sqlite3.connect(path)) as conn:
+                with conn:
+                    conn.execute("CREATE TABLE skill_outcomes (id INTEGER PRIMARY KEY, game_id TEXT NOT NULL, "
+                                 "skill TEXT NOT NULL, target TEXT NOT NULL, result TEXT NOT NULL, "
+                                 "duration REAL NOT NULL, ts REAL NOT NULL, run_id TEXT NOT NULL)")
+                    conn.execute("INSERT INTO skill_outcomes(game_id,skill,target,result,duration,ts,run_id) "
+                                 "VALUES(?,?,?,?,?,?,?)",
+                                 ("sim", "move_pulse", "move", "SUCCESS", 0.5, 1.0, "legacy"))
+
+            store = SkillOutcomeStore(path)
+            summary = store.summary("sim")[0]
+            self.assertEqual((summary["successes"], summary["attempts"]), (1, 1))
+            self.assertIsNone(summary["verified_example"])
+
+            store.record("sim", "move_pulse", "move", "SUCCESS_VERIFIED", 0.4, "new",
+                         args={"direction": "forward", "seconds": 0.4},
+                         expected_result="nearer", success_check="target is closer")
+            reopened = SkillOutcomeStore(path).summary("sim")[0]
+            self.assertEqual((reopened["successes"], reopened["attempts"]), (2, 2))
+            self.assertEqual(reopened["verified_example"]["args"],
+                             {"direction": "forward", "seconds": 0.4})
+
     def test_dry_run_logs_would_send_and_never_calls_executor(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = SkillOutcomeStore(Path(tmp) / "outcomes.db")
