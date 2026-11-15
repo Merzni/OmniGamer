@@ -47,7 +47,7 @@
 | `approach_target_max_look_counts` | 30 | ограничение одного корректирующего поворота |
 | `approach_target_close_target_held_impulses` | 2 | осторожные импульсы после потери близкой цели |
 | `approach_target_close_target_held_duration` | 0.25 с | длительность осторожного импульса |
-| `approach_target_max_impulses` | 40 | предел импульсов клавиш движения |
+| `approach_target_max_impulses` | 40 | общий лимит команд ввода навыка, включая повороты камеры; число импульсов движения записывается отдельно |
 | `approach_target_max_seconds` | 120 с | предел времени |
 | `approach_target_lost_frames` | 3 | пропусков до ограниченного поиска |
 | `approach_target_lost_search_turns` | 6 | максимум поворотов поиска |

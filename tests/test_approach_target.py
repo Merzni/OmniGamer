@@ -191,6 +191,16 @@ class ApproachTargetTests(unittest.TestCase):
         nearby = box(0.58, 0.2)
         self.assertEqual(skill._select({"boxes": [nearby]}), nearby)
 
+    def test_profile_action_budget_counts_camera_commands(self):
+        settings = ApproachTargetSettings(max_impulses=1)
+        skill, controls, _ = self.make_skill([[box(0.8, 0.2)]], settings=settings)
+        result = skill.run()
+        self.assertEqual(result.state, "TIMEOUT")
+        self.assertEqual(result.reason, "max_actions")
+        self.assertEqual(result.input_actions, 1)
+        self.assertEqual(result.impulses, 0)
+        self.assertEqual(len([call for call in controls.calls if call[0] == "look"]), 1)
+
     def test_profile_jump_action_recovers_from_repeated_no_growth_after_side_step(self):
         profile = load_profile("minecraft")
         stable = box(0.5, 0.3)
@@ -231,7 +241,7 @@ class ApproachTargetTests(unittest.TestCase):
             pass
         skill, controls, detector = self.make_skill([
             [box(0.95, 0.2)], [], [box(0.5, 0.2)], [box(0.5, 0.2)],
-        ], settings=ApproachTargetSettings(max_impulses=1))
+        ], settings=ApproachTargetSettings(max_impulses=2))
         rows = []
         skill.recorder = lambda row, before, after: rows.append(row)
         skill.run()

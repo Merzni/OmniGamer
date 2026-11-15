@@ -80,6 +80,7 @@ def _approach_result(result: ApproachTargetResult) -> SkillResult:
             "last_box": result.last_box,
             "iterations": result.iterations,
             "impulses": result.impulses,
+            "input_actions": result.input_actions,
         },
     )
 

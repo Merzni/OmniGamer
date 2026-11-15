@@ -91,6 +91,7 @@ class ApproachTargetResult:
     impulses: int
     elapsed_seconds: float
     criterion: str | None = None
+    input_actions: int = 0
 
     def to_dict(self):
         return asdict(self)
@@ -151,6 +152,9 @@ class ApproachTargetSkill:
         self._started = None
         self._iterations = 0
         self._impulses = 0
+        # Profile max_actions is shared by movement and camera input. Keep the
+        # movement-only counter separately for diagnostics.
+        self._input_actions = 0
         self._last_box = None
         self._last_valid_box = None
         self._last_center = None
@@ -344,6 +348,7 @@ class ApproachTargetSkill:
         dy = -bounded if direction == "up" else bounded if direction == "down" else 0
         filtered.update(x=dx, y=dy)
         self.controls.move_camera(dx, dy)
+        self._input_actions += 1
         self.camera_guard.executed(filtered)
         return {"type": "look", "direction": direction, "counts": dx if dx else dy,
                 "sent_counts": [dx, dy]}
@@ -388,6 +393,8 @@ class ApproachTargetSkill:
             "e": {"before": before_e, "after": after_e},
             "h_delta": h_delta,
             "progress": progress,
+            "input_actions": self._input_actions,
+            "movement_impulses": self._impulses,
             "action": action,
             "reason": reason or None,
             "elapsed_seconds": round(self.clock() - self._started, 3),
@@ -402,7 +409,7 @@ class ApproachTargetSkill:
             state=state, reason=reason, last_box=self._last_box,
             iterations=self._iterations, impulses=self._impulses,
             elapsed_seconds=round(max(0.0, self.clock() - self._started), 3),
-            criterion=criterion,
+            criterion=criterion, input_actions=self._input_actions,
         )
 
     def run(self):
@@ -429,8 +436,8 @@ class ApproachTargetSkill:
                 self.stop_check()
                 if self.clock() - self._started >= self.settings.max_seconds:
                     return self._result("TIMEOUT", "max_seconds")
-                if self._impulses >= self.settings.max_impulses:
-                    return self._result("TIMEOUT", "max_impulses")
+                if self._input_actions >= self.settings.max_impulses:
+                    return self._result("TIMEOUT", "max_actions")
 
                 self._iterations += 1
                 before = current_frame
@@ -449,6 +456,7 @@ class ApproachTargetSkill:
                     self._pending_side_step = None
                     self.controls.press_key(direction, 0.5)
                     self._impulses += 1
+                    self._input_actions += 1
                     action = {"type": "side_step", "key": direction, "duration": 0.5}
                     state = "ACQUIRE"
                 elif self._pending_jump_recovery:
@@ -457,6 +465,7 @@ class ApproachTargetSkill:
                     duration = min(jump.duration, self.profile.motion_limits.max_action_seconds, 0.75)
                     self.controls.press_keys([self.move_keys["forward"], jump.value], duration)
                     self._impulses += 1
+                    self._input_actions += 1
                     action = {"type": "jump_recovery", "keys": [self.move_keys["forward"], jump.value],
                               "duration": duration}
                     state = "JUMP_RECOVERY"
@@ -468,6 +477,7 @@ class ApproachTargetSkill:
                         else:
                             self.controls.press_key(self.move_keys["forward"], self.settings.close_target_held_duration)
                             self._impulses += 1
+                            self._input_actions += 1
                             action = {"type": "cautious_walk", "key": self.move_keys["forward"],
                                       "duration": self.settings.close_target_held_duration}
                     elif (self._missing_frames >= self.settings.lost_frames
@@ -477,6 +487,7 @@ class ApproachTargetSkill:
                         state = "CLOSE_TARGET_HELD"
                         self.controls.press_key(self.move_keys["forward"], self.settings.close_target_held_duration)
                         self._impulses += 1
+                        self._input_actions += 1
                         action = {"type": "cautious_walk", "key": self.move_keys["forward"],
                                   "duration": self.settings.close_target_held_duration}
                     else:
@@ -521,6 +532,7 @@ class ApproachTargetSkill:
                     elif state == "ADVANCE":
                         self.controls.press_key(self.move_keys["forward"], self.settings.walk_duration)
                         self._impulses += 1
+                        self._input_actions += 1
                         action = {"type": "walk", "key": self.move_keys["forward"],
                                   "duration": self.settings.walk_duration}
 
