@@ -203,7 +203,7 @@ class GoalPlannerTests(unittest.TestCase):
             store.record("sim", "approach_target", "reach a tree", "FAILED", 2, "r2")
             self.assertIsNone(store.summary("sim")[0]["verified_example"])
 
-            store.record("sim", "approach_target", "reach a tree", "SUCCESS", 1, "r3",
+            store.record("sim", "approach_target", "reach a tree", "APPROACH_REACHED", 1, "r3",
                          args={"target_text": "birch trunk"}, expected_result="near the trunk",
                          success_check="target remains centered")
             self.assertEqual(store.summary("sim")[0]["verified_example"]["args"],
@@ -221,7 +221,7 @@ class GoalPlannerTests(unittest.TestCase):
             with closing(sqlite3.connect(path)) as conn:
                 columns = {row[1] for row in conn.execute("PRAGMA table_info(skill_outcomes)")}
             self.assertTrue({"args_json", "expected_result", "success_check"}.issubset(columns))
-            store.record("sim", "turn", "look around", "SUCCESS", 0.2, "r1",
+            store.record("sim", "turn", "look around", "SUCCESS_VERIFIED", 0.2, "r1",
                          args={"direction": "left", "amount": 20},
                          expected_result="new area visible", success_check="landmark changed")
             example = store.summary("sim")[0]["verified_example"]
@@ -251,6 +251,20 @@ class GoalPlannerTests(unittest.TestCase):
             self.assertEqual((reopened["successes"], reopened["attempts"]), (2, 2))
             self.assertEqual(reopened["verified_example"]["args"],
                              {"direction": "forward", "seconds": 0.4})
+
+    def test_generic_success_counts_but_never_emits_verified_example(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SkillOutcomeStore(Path(tmp) / "outcomes.db")
+            store.record("sim", "move_pulse", "move", "SUCCESS_VERIFIED", 1, "r1",
+                         args={"direction": "forward", "seconds": 0.5},
+                         expected_result="nearer", success_check="target is closer")
+            store.record("sim", "move_pulse", "move", "SUCCESS", 0.5, "r2",
+                         args={"direction": "forward", "seconds": 0.5},
+                         expected_result="nearer", success_check="target is closer")
+            summary = store.summary("sim")[0]
+            self.assertEqual((summary["successes"], summary["attempts"], summary["success_rate"]),
+                             (2, 2, 1.0))
+            self.assertIsNone(summary["verified_example"])
 
     def test_dry_run_logs_would_send_and_never_calls_executor(self):
         with tempfile.TemporaryDirectory() as tmp:

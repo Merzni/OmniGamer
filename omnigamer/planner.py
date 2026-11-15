@@ -172,15 +172,17 @@ class SkillOutcomeStore:
         for skill, target, result, args_json, expected_result, success_check in rows:
             item = grouped.setdefault((skill, target), [0, 0, 0, None, False])
             item[1] += 1
-            is_success = result in {SkillStatus.SUCCESS.value, "SUCCESS_VERIFIED"}
+            is_success = result in {SkillStatus.SUCCESS.value, "SUCCESS_VERIFIED",
+                                    "TARGET_DETECTED", "APPROACH_REACHED", "CONDITION_MET"}
             item[0] += is_success
             item[2] += result in {SkillStatus.UNCONFIRMED.value, "SUCCESS_REGION_CHANGE",
                                   "REGION_CHANGE_UNCONFIRMED"}
-            # Rows are newest first. A later failure/uncertain attempt invalidates
-            # the old recipe until the skill succeeds again with a fresh example.
+            # Rows are newest first. A later failure, uncertain attempt, or generic
+            # command success invalidates the old recipe until a fresh verified result.
             if not item[4]:
                 item[4] = True
-                if not is_success or not args_json:
+                if result not in {"SUCCESS_VERIFIED", "TARGET_DETECTED",
+                                  "APPROACH_REACHED", "CONDITION_MET"} or not args_json:
                     continue
                 try:
                     args = json.loads(args_json)

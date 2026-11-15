@@ -62,7 +62,7 @@ def _run_recorded(recorder, operation):
 def _approach_result(result: ApproachTargetResult) -> SkillResult:
     state = result.state.upper()
     if state == "REACHED":
-        status, result_code = SkillStatus.SUCCESS, "SUCCESS"
+        status, result_code = SkillStatus.SUCCESS, "APPROACH_REACHED"
     elif state in {"REACHED_UNCONFIRMED", "UNCERTAIN"}:
         status, result_code = SkillStatus.UNCONFIRMED, "UNCONFIRMED"
     elif state == "ABORT":
@@ -153,13 +153,14 @@ def default_registry():
             description="Align with and move toward a visually detected target using bounded camera and movement pulses.",
             params_model=ApproachTargetParams,
             preconditions=("A visible frame is available.", "The detector and input controller are healthy."),
-            result_contract=tuple(status.value for status in SkillStatus),
+            result_contract=("APPROACH_REACHED", "FAILED", "ABORT", "UNCONFIRMED"),
             timeout_seconds=120,
             resources=("detector", "input", "camera_guard"),
             executor=execute_approach_target,
         ),
         SkillSpec("search_target", "Scan a bounded camera sweep until a visual target is detected.",
-                  SearchTargetParams, ("Detector is healthy.",), tuple(s.value for s in SkillStatus),
+                  SearchTargetParams, ("Detector is healthy.",),
+                  ("TARGET_DETECTED", "FAILED", "ABORT", "UNCONFIRMED"),
                   60, ("detector", "input", "camera_guard"), execute_search_target),
         SkillSpec("interact_until_change", "Repeat a configured interaction until a named screen region changes.",
                   InteractUntilChangeParams, ("The named region and action exist in the profile.",),
@@ -173,5 +174,6 @@ def default_registry():
                   10, ("input", "camera_guard"), execute_turn),
         SkillSpec("wait_for_condition", "Wait for a visual query or named region condition to appear or disappear.",
                   WaitForConditionParams, ("A detector or named region is configured.",),
-                  tuple(s.value for s in SkillStatus), 300, ("capture", "detector"), execute_wait_for_condition),
+                  ("CONDITION_MET", "FAILED", "ABORT", "UNCONFIRMED"),
+                  300, ("capture", "detector"), execute_wait_for_condition),
     ))

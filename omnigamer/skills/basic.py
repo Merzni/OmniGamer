@@ -219,7 +219,7 @@ def search_target(target_text, sweep, *, capture, detector, controls, camera_gua
                         "boxes": boxes, "turns": index, "action": None}
             _emit(recorder, "search_target", index + 1, SkillStatus.SUCCESS,
                   "target_detected", evidence, frame, frame)
-            return _result(SkillStatus.SUCCESS, "SUCCESS", "target_detected", evidence, started)
+            return _result(SkillStatus.SUCCESS, "TARGET_DETECTED", "target_detected", evidence, started)
         if index == max_turns:
             break
         turn_result = turn("right", profile.motion_limits.max_turn_counts,
@@ -250,7 +250,7 @@ def search_target(target_text, sweep, *, capture, detector, controls, camera_gua
                             "action": turn_result.evidence.get("action")}
                 _emit(recorder, "search_target", max_turns + 1, SkillStatus.SUCCESS,
                       "target_detected", evidence, frame, None)
-                return _result(SkillStatus.SUCCESS, "SUCCESS", "target_detected", evidence, started)
+                return _result(SkillStatus.SUCCESS, "TARGET_DETECTED", "target_detected", evidence, started)
     evidence = {"target_text": params.target_text, "queries": queries,
                 "turns": max_turns, "action": None}
     return _result(SkillStatus.FAILED, "FAILED", "target_not_found_within_sweep", evidence, started)
@@ -358,6 +358,6 @@ def wait_for_condition(*, capture, profile, timeout, query=None, region=None,
         if condition_met:
             _emit(recorder, "wait_for_condition", step, SkillStatus.SUCCESS,
                   "condition_met", last_evidence, baseline, frame)
-            return _result(SkillStatus.SUCCESS, "SUCCESS", "condition_met", last_evidence, started)
+            return _result(SkillStatus.SUCCESS, "CONDITION_MET", "condition_met", last_evidence, started)
         time.sleep(min(poll_seconds, max(0, deadline - time.monotonic())))
     return _result(SkillStatus.FAILED, "FAILED", "condition_timeout", last_evidence, started)

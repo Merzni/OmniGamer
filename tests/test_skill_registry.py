@@ -14,7 +14,8 @@ class SkillRegistryTests(unittest.TestCase):
             "search_target", "turn", "wait_for_condition"))
         schema = registry.planner_catalog()[0]
         self.assertEqual(schema["resources"], ["detector", "input", "camera_guard"])
-        self.assertIn("SUCCESS", schema["results"])
+        self.assertIn("APPROACH_REACHED", schema["results"])
+        self.assertNotIn("SUCCESS", schema["results"])
         self.assertEqual(registry.validate("approach_target", {"target_text": "a target"}).target_text,
                          "a target")
 
@@ -30,6 +31,7 @@ class SkillRegistryTests(unittest.TestCase):
             return ApproachTargetResult(state, "reason", None, 2, 1, 0.5)
 
         self.assertEqual(_approach_result(raw("REACHED")).status, SkillStatus.SUCCESS)
+        self.assertEqual(_approach_result(raw("REACHED")).result_code, "APPROACH_REACHED")
         self.assertEqual(_approach_result(raw("REACHED_UNCONFIRMED")).status, SkillStatus.UNCONFIRMED)
         self.assertEqual(_approach_result(raw("UNCERTAIN")).status, SkillStatus.UNCONFIRMED)
         self.assertEqual(_approach_result(raw("ABORT")).status, SkillStatus.ABORT)

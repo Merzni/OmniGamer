@@ -106,6 +106,7 @@ class BasicSkillTests(unittest.TestCase):
         result = search_target("a tree trunk", 6, capture=FakeCapture([frame]), detector=detector,
                                controls=controls, camera_guard=self.guard, profile=self.profile)
         self.assertEqual(result.status, SkillStatus.SUCCESS)
+        self.assertEqual(result.result_code, "TARGET_DETECTED")
         self.assertEqual(detector.calls, 1)
         self.assertEqual(controls.calls, [])
 
@@ -160,6 +161,7 @@ class BasicSkillTests(unittest.TestCase):
                                     timeout=1, query="a tree trunk", detector=detector,
                                     poll_seconds=0)
         self.assertEqual(result.status, SkillStatus.SUCCESS)
+        self.assertEqual(result.result_code, "CONDITION_MET")
 
     def test_registry_executor_creates_and_finishes_common_telemetry(self):
         with tempfile.TemporaryDirectory() as temp:
