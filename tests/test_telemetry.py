@@ -196,6 +196,18 @@ class TelemetryTests(unittest.TestCase):
         resources = [{"process_ram_mb": 100, "gpu_vram_used_mb": 500},
                      {"process_ram_mb": 200, "gpu_vram_used_mb": 1000}]
         (run_dir / "resources.jsonl").write_text("".join(json.dumps(row) + "\n" for row in resources), encoding="utf-8")
+        goal_events = [
+            {"event": "plan", "duration_seconds": 0.2, "request_count": 1},
+            {"event": "skill_result", "result": {"evidence": {"verification": {
+                "scope": "goal_postcondition", "duration_seconds": 0.8}}}},
+            {"event": "goal_postcondition", "result": {"evidence": {"verification": {
+                "scope": "goal_postcondition", "duration_seconds": 1.2}}}},
+            {"event": "skill_result", "result": {"evidence": {"verification": {
+                "scope": "region_change", "duration_seconds": 0.5}}}},
+            {"event": "run_finish", "status": "SUCCESS", "reason": "plan_completed"},
+        ]
+        (run_dir / "goal_steps.jsonl").write_text(
+            "".join(json.dumps(row) + "\n" for row in goal_events), encoding="utf-8")
 
         script = Path(__file__).resolve().parents[1] / "tools" / "summarize_run.py"
         result = subprocess.run([sys.executable, str(script), str(run_dir)], capture_output=True,
@@ -207,6 +219,10 @@ class TelemetryTests(unittest.TestCase):
         self.assertIn("RAM процесса, пик/среднее: 200.00 МБ / 150.00 МБ", result.stdout)
         self.assertIn("VRAM, пик/среднее: 1000.00 МБ / 750.00 МБ", result.stdout)
         self.assertIn("Шагов с fallback: 1 (25.0%)", result.stdout)
+        self.assertIn("Проверки постусловия цели: N=2; среднее 1000.00 мс; медиана 1000.00 мс; p95 1200.00 мс",
+                      result.stdout)
+        self.assertIn("Проверки дельты региона: N=1; среднее 500.00 мс; медиана 500.00 мс; p95 500.00 мс",
+                      result.stdout)
 
 
 if __name__ == "__main__":

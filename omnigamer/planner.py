@@ -363,20 +363,20 @@ class GoalExecutor:
         if self.result_verifier is None:
             if not force:
                 return {**result, "status": SkillStatus.UNCONFIRMED.value,
-                        "result_code": "UNCONFIRMED", "reason": "region_changed_without_success_check"}
+                        "result_code": "UNCONFIRMED", "reason": "region_changed_without_success_check",
+                        "evidence": {**(result.get("evidence") or {}), "verification": {
+                            "scope": "region_change", "result": "unknown", "source": "no_verifier"}}}
             return {**result, "status": SkillStatus.UNCONFIRMED.value,
-                    "result_code": "UNCONFIRMED", "reason": "goal_result_unverified"}
+                    "result_code": "UNCONFIRMED", "reason": "goal_result_unverified",
+                    "evidence": {**(result.get("evidence") or {}), "verification": {
+                        "scope": "goal_postcondition", "result": "unknown", "source": "no_verifier"}}}
+        verification_scope = "goal_postcondition" if force else "region_change"
         evidence = dict(result.get("evidence") or {})
         if timeout_seconds <= 0:
             return {**result, "status": SkillStatus.UNCONFIRMED.value,
                     "result_code": "UNCONFIRMED", "reason": "success_check_time_budget_exhausted",
                     "evidence": {**evidence, "verification": {"result": "unknown",
-                                                                    "source": "time_budget"}}}
-        if self.result_verifier is None:
-            return {**result, "status": SkillStatus.UNCONFIRMED.value,
-                    "result_code": "UNCONFIRMED", "reason": "region_changed_without_success_check",
-                    "evidence": {**evidence, "verification": {"result": "unknown",
-                                                                    "source": "no_verifier"}}}
+                        "scope": verification_scope, "source": "time_budget"}}}
         verify_started = self.clock()
         try:
             assessment = self.result_verifier(step, before, after, result, timeout_seconds)
@@ -385,7 +385,7 @@ class GoalExecutor:
             verdict = getattr(assessment, "result", "unknown")
             confidence = float(getattr(assessment, "confidence", 0.0))
             proof = str(getattr(assessment, "evidence", ""))
-            verification = {"result": verdict, "confidence": confidence,
+            verification = {"scope": verification_scope, "result": verdict, "confidence": confidence,
                             "evidence": proof,
                             "evidence_source": getattr(assessment, "evidence_source", "unknown"),
                             "usable": usable, "duration_seconds": verify_duration}
@@ -415,7 +415,8 @@ class GoalExecutor:
                     "duration_seconds": float(result.get("duration_seconds", 0.0)) +
                         max(0.0, self.clock() - verify_started),
                     "evidence": {**evidence, "verification": {"result": "unknown",
-                        "source": "error", "error": f"{type(exc).__name__}: {exc}"[:300]}}}
+                        "scope": verification_scope, "source": "error",
+                        "error": f"{type(exc).__name__}: {exc}"[:300]}}}
 
     def _finish(self, result):
         result.setdefault("memory_reuse_count", self.memory_reuse_count)
@@ -608,14 +609,12 @@ class GoalExecutor:
                                     verification_after = self.frame_provider()
                                     verification_budget = self.profile.motion_limits.max_run_seconds - (
                                         self.clock() - started)
-                                    recovered = self._verify_result(
-                                        step, recovered, verification_before, verification_after,
-                                        verification_budget, force=True)
                                 else:
-                                    recovered = {**recovered,
-                                        "status": SkillStatus.UNCONFIRMED.value,
-                                        "result_code": "UNCONFIRMED",
-                                        "reason": "goal_result_unverified"}
+                                    verification_after = None
+                                    verification_budget = 0
+                                recovered = self._verify_result(
+                                    step, recovered, verification_before, verification_after,
+                                    verification_budget, force=True)
                                 if not self.dry_run:
                                     self.store.record(
                                         self.game_id, step.skill, goal,
