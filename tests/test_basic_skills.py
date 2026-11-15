@@ -150,7 +150,9 @@ class BasicSkillTests(unittest.TestCase):
         result = interact_until_change("hotbar", "primary_hold", 2,
                                       capture=FakeCapture([frame, frame, frame]), controls=controls,
                                       profile=profile, camera_guard=self.guard)
-        self.assertEqual(result.reason, "region_unchanged_after_repeats")
+        self.assertEqual(result.status, SkillStatus.UNCONFIRMED)
+        self.assertEqual(result.result_code, "INTERACTION_OUTCOME_UNCONFIRMED")
+        self.assertEqual(result.reason, "interaction_without_region_change")
         self.assertEqual(controls.calls, [("mouse", "left", 2.5), ("mouse", "left", 2.5)])
 
     def test_wait_for_condition_returns_on_detector_match(self):

@@ -389,6 +389,28 @@ class GoalPlannerTests(unittest.TestCase):
             self.assertEqual(summary["uncertain"], 1)
             self.assertIsNone(summary["verified_example"])
 
+    def test_interaction_without_region_delta_stays_uncertain_without_verifier(self):
+        with tempfile.TemporaryDirectory() as temp:
+            self.profile.actions = {"primary_hold": {"kind": "mouse", "value": "left"}}
+            self.profile.regions = {"hotbar": {"x1": .3, "y1": .9, "x2": .7, "y2": 1}}
+            step = {"steps": [{"skill": "interact_until_change", "args": {
+                "region": "hotbar", "action": "primary_hold", "max_repeats": 3},
+                "expected_result": "target removed", "success_check": "target disappeared"}]}
+            store = SkillOutcomeStore(Path(temp) / "outcomes.db")
+            runner = GoalExecutor(
+                GoalPlanner(self.registry, lambda **_: step), self.registry, store,
+                profile=self.profile, game_id="sim",
+                execute_skill=lambda *_: SkillResult(status=SkillStatus.UNCONFIRMED,
+                    result_code="INTERACTION_OUTCOME_UNCONFIRMED",
+                    reason="interaction_without_region_change"),
+                frame_provider=lambda: Image.new("RGB", (8, 8)), stop_check=lambda: None,
+                max_replans=0)
+            runner.run("remove target")
+            summary = store.summary("sim")[0]
+            self.assertEqual(summary["successes"], 0)
+            self.assertEqual(summary["uncertain"], 1)
+            self.assertIsNone(summary["verified_example"])
+
     def test_goal_result_is_unconfirmed_without_final_postcondition_verifier(self):
         with tempfile.TemporaryDirectory() as temp:
             store = SkillOutcomeStore(Path(temp) / "outcomes.db")
@@ -462,6 +484,47 @@ class GoalPlannerTests(unittest.TestCase):
                 result = runner.run("collect a log")
                 self.assertEqual(result["status"], expected)
                 self.assertEqual(calls[0][0], "visible log count increased")
+
+    def test_success_check_can_confirm_world_progress_without_region_delta(self):
+        class Assessment:
+            result = "progress"
+            confidence = .95
+            evidence = "the target block disappeared"
+            evidence_source = "visual_model"
+            usable = True
+
+        with tempfile.TemporaryDirectory() as temp:
+            self.profile.actions = {"primary_hold": {"kind": "mouse", "value": "left"}}
+            self.profile.regions = {"hotbar": {"x1": .3, "y1": .9, "x2": .7, "y2": 1}}
+            step = {"steps": [{"skill": "interact_until_change", "args": {
+                "region": "hotbar", "action": "primary_hold", "max_repeats": 3},
+                "expected_result": "target removed", "success_check": "the target block disappeared"}]}
+            calls = []
+            planning_frame = Image.new("RGB", (8, 8), (0, 0, 0))
+            before = Image.new("RGB", (8, 8), (0, 0, 0))
+            after = before.copy()
+            after.putpixel((2, 2), (255, 255, 255))  # Target area changed; hotbar pixels did not.
+            frames = [planning_frame, before, after]
+
+            def verify(plan_step, observed_before, observed_after, result, _timeout):
+                calls.append((plan_step.success_check, result["result_code"]))
+                self.assertEqual(observed_before.getpixel((0, 7)), observed_after.getpixel((0, 7)))
+                self.assertNotEqual(observed_before.getpixel((2, 2)), observed_after.getpixel((2, 2)))
+                return Assessment()
+
+            runner = GoalExecutor(
+                GoalPlanner(self.registry, lambda **_: step), self.registry,
+                SkillOutcomeStore(Path(temp) / "outcomes.db"), profile=self.profile, game_id="sim",
+                execute_skill=lambda *_: SkillResult(status=SkillStatus.UNCONFIRMED,
+                    result_code="INTERACTION_OUTCOME_UNCONFIRMED",
+                    reason="interaction_without_region_change"),
+                frame_provider=lambda: frames.pop(0), stop_check=lambda: None,
+                result_verifier=verify, max_replans=0)
+            result = runner.run("remove target")
+            self.assertEqual(result["status"], "SUCCESS")
+            self.assertEqual(calls, [("the target block disappeared", "INTERACTION_OUTCOME_UNCONFIRMED")])
+            recorded = runner.store.summary("sim")[0]
+            self.assertEqual(recorded["successes"], 1)
 
     def test_blocked_approach_uses_bounded_local_recovery_before_replanning(self):
         with tempfile.TemporaryDirectory() as tmp:

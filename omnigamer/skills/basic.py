@@ -302,9 +302,9 @@ def interact_until_change(region, action, max_repeats, *, capture, controls, pro
                   "region_changed_unverified", evidence, before, after)
             return _result(SkillStatus.UNCONFIRMED, "REGION_CHANGE_UNCONFIRMED",
                            "region_changed_unverified", evidence, started)
-        _emit(recorder, "interact_until_change", attempt, SkillStatus.FAILED,
-              "region_unchanged", evidence, before, after)
         if attempt < params.max_repeats:
+            _emit(recorder, "interact_until_change", attempt, SkillStatus.FAILED,
+                  "region_unchanged", evidence, before, after)
             retry_step = profile.motion_limits.interaction_retry_step_seconds
             if retry_step > 0:
                 moved = move_pulse("forward", min(retry_step, profile.motion_limits.max_action_seconds),
@@ -315,7 +315,13 @@ def interact_until_change(region, action, max_repeats, *, capture, controls, pro
                 before = capture.grab_frame()
             else:
                 before = after
-    return _result(SkillStatus.FAILED, "FAILED", "region_unchanged_after_repeats", evidence, started)
+    # A stable UI region is not proof that the world interaction failed (for
+    # example, a target may disappear without an immediate inventory update).
+    # Leave the outcome open for the goal-level visual postcondition check.
+    _emit(recorder, "interact_until_change", params.max_repeats, SkillStatus.UNCONFIRMED,
+          "interaction_without_region_change", evidence, before, after)
+    return _result(SkillStatus.UNCONFIRMED, "INTERACTION_OUTCOME_UNCONFIRMED",
+                   "interaction_without_region_change", evidence, started)
 
 
 def wait_for_condition(*, capture, profile, timeout, query=None, region=None,

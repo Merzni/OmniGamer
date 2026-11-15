@@ -204,6 +204,7 @@ def summarize(run_dir):
         plans = [row for row in goal_events if row.get("event") == "plan"]
         would_send = [row for row in goal_events if row.get("event") == "would_send"]
         postcondition_checks = []
+        interaction_checks = []
         result_checks = []
         for row in goal_events:
             verification = ((row.get("result") or {}).get("evidence") or {}).get("verification") or {}
@@ -211,6 +212,8 @@ def summarize(run_dir):
             if _number(duration):
                 if verification.get("scope") == "goal_postcondition":
                     postcondition_checks.append(duration * 1000)
+                elif verification.get("scope") == "interaction_outcome":
+                    interaction_checks.append(duration * 1000)
                 else:
                     result_checks.append(duration * 1000)
         goal_result = next((row for row in reversed(goal_events) if row.get("event") == "run_finish"), {})
@@ -225,6 +228,7 @@ def summarize(run_dir):
                       f"  would_send: {len(would_send)}",
                       f"  Доступно verified-примеров по планам: {verified_examples}; точных повторов args: {memory_reuse}",
                       f"  Проверки постусловия цели: {_format_stats(postcondition_checks)}",
+                      f"  Проверки исхода взаимодействия: {_format_stats(interaction_checks)}",
                       f"  Проверки дельты региона: {_format_stats(result_checks)}",
                       f"  Завершение: {goal_result.get('status', 'не записано')} — "
                       f"{goal_result.get('reason', 'не записана')}"])

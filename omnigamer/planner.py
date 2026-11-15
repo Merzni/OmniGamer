@@ -355,22 +355,27 @@ class GoalExecutor:
 
     def _verify_result(self, step, result, before, after, timeout_seconds, *, force=False):
         """Verify region-delta candidates and final goal postconditions."""
-        needs_check = result.get("result_code") in {"REGION_CHANGE_UNCONFIRMED", "SUCCESS_REGION_CHANGE"}
+        result_code = result.get("result_code")
+        needs_check = result_code in {
+            "REGION_CHANGE_UNCONFIRMED", "SUCCESS_REGION_CHANGE",
+            "INTERACTION_OUTCOME_UNCONFIRMED"}
         if not force and not needs_check:
             return result
+        verification_scope = ("goal_postcondition" if force else
+                              "interaction_outcome" if result_code == "INTERACTION_OUTCOME_UNCONFIRMED" else
+                              "region_change")
         if force and result.get("status") != SkillStatus.SUCCESS.value:
             return result
         if self.result_verifier is None:
             if not force:
                 return {**result, "status": SkillStatus.UNCONFIRMED.value,
-                        "result_code": "UNCONFIRMED", "reason": "region_changed_without_success_check",
+                        "result_code": "UNCONFIRMED", "reason": "interaction_without_success_check",
                         "evidence": {**(result.get("evidence") or {}), "verification": {
-                            "scope": "region_change", "result": "unknown", "source": "no_verifier"}}}
+                            "scope": verification_scope, "result": "unknown", "source": "no_verifier"}}}
             return {**result, "status": SkillStatus.UNCONFIRMED.value,
                     "result_code": "UNCONFIRMED", "reason": "goal_result_unverified",
                     "evidence": {**(result.get("evidence") or {}), "verification": {
                         "scope": "goal_postcondition", "result": "unknown", "source": "no_verifier"}}}
-        verification_scope = "goal_postcondition" if force else "region_change"
         evidence = dict(result.get("evidence") or {})
         if timeout_seconds <= 0:
             return {**result, "status": SkillStatus.UNCONFIRMED.value,
@@ -570,10 +575,11 @@ class GoalExecutor:
                                            else None)
                     result = self.execute_skill(spec, params, available)
                     result = result.model_dump() if hasattr(result, "model_dump") else result
-                    region_change_candidate = result.get("result_code") in {
-                        "REGION_CHANGE_UNCONFIRMED", "SUCCESS_REGION_CHANGE"}
+                    verification_candidate = result.get("result_code") in {
+                        "REGION_CHANGE_UNCONFIRMED", "SUCCESS_REGION_CHANGE",
+                        "INTERACTION_OUTCOME_UNCONFIRMED"}
                     verify_final = is_final_step and result.get("status") == SkillStatus.SUCCESS.value
-                    if (step.skill == "interact_until_change" and region_change_candidate) or verify_final:
+                    if (step.skill == "interact_until_change" and verification_candidate) or verify_final:
                         verification_after = self.frame_provider() if self.result_verifier else None
                         verification_budget = self.profile.motion_limits.max_run_seconds - (
                             self.clock() - started)
