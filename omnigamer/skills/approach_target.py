@@ -521,6 +521,12 @@ class ApproachTargetSkill:
                         action = self._camera(direction, 12)
                         action["type"] = "search_look"
                         self._lost_search_turns += 1
+                elif (self._reach_geometry(before_box)[0]
+                      and self._crosshair_aimed(before_box)):
+                    # Confirm a reached pose with another observation, not a
+                    # forward pulse that could move the player past the target.
+                    state = "CONFIRM_REACHED"
+                    action = {"type": "observe", "duration": 0}
                 elif before_box and self._calibration is None:
                     state = "ACQUIRE"
                     action = self._camera("right", self.settings.calibration_counts)

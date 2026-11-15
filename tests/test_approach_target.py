@@ -114,7 +114,7 @@ class ApproachTargetTests(unittest.TestCase):
         result = skill.run()
         self.assertEqual(result.state, "REACHED")
         self.assertEqual(result.criterion, "top_edge_centered_stable")
-        self.assertEqual([call[1] for call in controls.calls if call[0] == "key"], ["w", "w"])
+        self.assertEqual([call[1] for call in controls.calls if call[0] == "key"], ["w"])
         self.assertTrue(controls.released)
         self.assertEqual(detector.calls, 3)
 
@@ -134,7 +134,15 @@ class ApproachTargetTests(unittest.TestCase):
         result = skill.run()
         self.assertEqual(result.state, "REACHED")
         self.assertIn(("look", 0, -12), controls.calls)
-        self.assertEqual(sum(call == ("key", "w", 0.5) for call in controls.calls), 2)
+        self.assertEqual(sum(call == ("key", "w", 0.5) for call in controls.calls), 1)
+
+    def test_reached_pose_gets_neutral_confirmation_without_extra_movement(self):
+        skill, controls, detector = self.make_skill([[reach_box()], [reach_box()], [reach_box()]])
+        result = skill.run()
+        self.assertEqual(result.state, "REACHED")
+        self.assertEqual(result.iterations, 2)
+        self.assertEqual(detector.calls, 3)
+        self.assertEqual(controls.calls, [])
 
     def test_fallback_query_can_guide_approach_but_cannot_confirm_reached(self):
         skill, _, _ = self.make_skill([[]])
