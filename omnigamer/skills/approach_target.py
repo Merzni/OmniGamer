@@ -331,6 +331,10 @@ class ApproachTargetSkill:
     def _reach_geometry(self, box):
         if not box:
             return False, None
+        observed_query = " ".join(str(box.get("query", self.target_text)).casefold().split())
+        requested_query = " ".join(self.target_text.casefold().split())
+        if observed_query != requested_query:
+            return False, None
         width = float(box["x2"]) - float(box["x1"])
         center_x = (float(box["x1"]) + float(box["x2"])) / 2
         valid = (float(box["y1"]) <= self.settings.reach_top_y

@@ -136,6 +136,13 @@ class ApproachTargetTests(unittest.TestCase):
         self.assertIn(("look", 0, -12), controls.calls)
         self.assertEqual(sum(call == ("key", "w", 0.5) for call in controls.calls), 2)
 
+    def test_fallback_query_can_guide_approach_but_cannot_confirm_reached(self):
+        skill, _, _ = self.make_skill([[]])
+        broad_fallback = {**reach_box(), "query": "a tree"}
+        exact_target = {**reach_box(), "query": "a tree trunk"}
+        self.assertFalse(skill._reach_geometry(broad_fallback)[0])
+        self.assertTrue(skill._reach_geometry(exact_target)[0])
+
     def test_preprocess_modes_return_image_and_parameters(self):
         image = Image.new("RGB", (64, 64), (20, 30, 40))
         for mode in ("none", "gamma", "clahe", "stretch"):
