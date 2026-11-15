@@ -430,7 +430,7 @@ class GoalExecutor:
     def _recover_blocked_approach(self, goal, target_text, started, steps_used):
         """Try one bounded camera sweep and a fresh approach before a slow VLM replan."""
         if self.dry_run:
-            return None, 0
+            return None, 0, None
         turn_amount = min(60, self.profile.motion_limits.max_turn_counts)
         recovery = (
             ("turn", {"direction": "right", "amount": turn_amount}),
@@ -439,22 +439,24 @@ class GoalExecutor:
         )
         used = 0
         last_result = None
+        last_skill = None
         for name, args in recovery:
             self.stop_check()
             if self.input_action_budget is not None and self.input_action_budget.exhausted:
                 return {"status": "FAILED", "result_code": "FAILED", "reason": "max_actions",
-                        "evidence": {"recovery": "approach"}}, used
+                        "evidence": {"recovery": "approach"}}, used, last_skill
             if steps_used + used >= self.max_steps:
                 return {"status": "FAILED", "result_code": "FAILED", "reason": "max_skill_steps",
-                        "evidence": {"recovery": "approach"}}, used
+                        "evidence": {"recovery": "approach"}}, used, last_skill
             remaining = self.profile.motion_limits.max_run_seconds - (self.clock() - started)
             spec = self.registry.get(name)
             available = min(remaining, float(spec.timeout_seconds))
             if available <= 0:
                 return {"status": "FAILED", "result_code": "FAILED", "reason": "max_run_seconds",
-                        "evidence": {"recovery": "approach"}}, used
+                        "evidence": {"recovery": "approach"}}, used, last_skill
             params = spec.validate_args(args).model_dump(mode="json")
             begin = self.clock()
+            last_skill = name
             last_result = self.execute_skill(spec, params, available)
             last_result = last_result.model_dump() if hasattr(last_result, "model_dump") else last_result
             duration = last_result.get("duration_seconds", max(0.0, self.clock() - begin))
@@ -467,8 +469,8 @@ class GoalExecutor:
                              "skill": name, "args": params, "result": last_result})
             used += 1
             if last_result.get("status") != SkillStatus.SUCCESS.value:
-                return last_result, used
-        return last_result, used
+                return last_result, used, last_skill
+        return last_result, used, last_skill
 
     def run(self, goal):
         started, steps_used, replans, failure = self.clock(), 0, 0, ""
@@ -601,10 +603,10 @@ class GoalExecutor:
                     if (step.skill == "approach_target"
                             and result.get("reason") in {
                                 "blocked_after_side_step", "target_not_reacquired"}):
-                        recovered, recovery_steps = self._recover_blocked_approach(
+                        recovered, recovery_steps, recovery_skill = self._recover_blocked_approach(
                             goal, params["target_text"], started, steps_used)
                         steps_used += recovery_steps
-                        recovery_approach_ran = recovery_steps == 3
+                        recovery_approach_ran = recovery_skill == "approach_target"
                         if recovered and recovered.get("status") == SkillStatus.SUCCESS.value:
                             if is_final_step:
                                 if self.result_verifier:
