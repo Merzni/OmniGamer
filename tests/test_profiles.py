@@ -18,6 +18,16 @@ class GameProfileTests(unittest.TestCase):
         self.assertEqual(profile.detector_queries["tree_trunk"], ["a tree trunk", "a tree"])
         self.assertIn("hotbar", profile.regions)
 
+    def test_crosshair_target_precondition_is_explicitly_profiled(self):
+        self.assertFalse(GameProfile(game_id="generic").mine_requires_target_at_crosshair)
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "mining.json"
+            path.write_text(json.dumps({"game_id": "mining-game",
+                                        "mine_requires_target_at_crosshair": True}),
+                            encoding="utf-8")
+            profile = load_profile("mining-game", path)
+            self.assertTrue(profile.mine_requires_target_at_crosshair)
+
     def test_explicit_profile_requires_matching_game_id(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "profile.json"

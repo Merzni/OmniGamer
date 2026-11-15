@@ -77,6 +77,7 @@ class GameProfile(BaseModel):
     motion_limits: MotionLimits = Field(default_factory=MotionLimits)
     detector_queries: Dict[str, list[str]] = Field(default_factory=dict)
     ui_adapters: list[Literal["world_selection"]] = Field(default_factory=list)
+    mine_requires_target_at_crosshair: bool = False
     thresholds: Dict[str, float] = Field(default_factory=dict)
     prompt_addendum: str = Field(default="", max_length=4000)
     calibration: Dict[str, float | bool] = Field(default_factory=dict)

@@ -14,6 +14,7 @@ class FrameFacts(BaseModel):
     pitch: Literal["up", "down", "level", "unknown"] = "unknown"
     open_ground: Optional[bool] = None
     safe_footing: Optional[bool] = None
+    target_at_crosshair: Optional[bool] = None
     visible_items_readable: bool = False
     items: list[VisibleItem] = Field(default_factory=list, max_length=9)
     hand_item: str = Field(default="unknown", max_length=40)

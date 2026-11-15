@@ -589,6 +589,8 @@ class OmniAgent:
         filtered, guard_reason = self.camera_guard.filter(
             decision.model_dump(), facts=facts,
             grounded_confident=grounded_confident,
+            require_target_at_crosshair=bool(getattr(
+                self.profile, "mine_requires_target_at_crosshair", False)),
         )
         self.last_guard_reason = guard_reason or profile_camera_reason
         if self.last_guard_reason:
@@ -625,11 +627,15 @@ class OmniAgent:
                     failed_conditions.append("pitch_not_level")
                 if not grounded_confident:
                     failed_conditions.append("grounded_confident_false")
+                if (getattr(self.profile, "mine_requires_target_at_crosshair", False)
+                        and facts.target_at_crosshair is not True):
+                    failed_conditions.append("target_at_crosshair_unconfirmed")
                 self._telemetry_trace.data["decision"]["guard"] = {
                     "facts": {
                         "pitch": facts.pitch,
                         "scene": facts.scene,
                         "safe_footing": facts.safe_footing,
+                        "target_at_crosshair": facts.target_at_crosshair,
                         "facts_confident": bool(facts_confident),
                         "grounded_confident": bool(grounded_confident),
                         "source": facts_source,

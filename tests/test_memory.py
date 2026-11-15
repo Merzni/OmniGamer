@@ -205,11 +205,12 @@ class AgentMemoryTests(unittest.TestCase):
         self.addCleanup(setattr,agent_module.config,"desktop_bot_pointer",agent_module.config.desktop_bot_pointer)
         agent_module.config.desktop_bot_pointer=False
 
-    def create(self, game_id="survival"):
+    def create(self, game_id="survival", mine_requires_target_at_crosshair=False):
         profile = GameProfile(game_id=game_id, camera_type="first_person",
             actions={"primary_hold": InputAction(kind="mouse", value="left", duration=3),
                      "interact": InputAction(kind="mouse", value="right", duration=0.15),
-                     "jump": InputAction(kind="key", value="space", duration=0.75)})
+                     "jump": InputAction(kind="key", value="space", duration=0.75)},
+            mine_requires_target_at_crosshair=mine_requires_target_at_crosshair)
         return self.module.OmniAgent(db_path=self.path, hwnd=123, game_id=game_id,input_backend="native",
                                      emergency_hotkey_enabled=False, telemetry_enabled=False,
                                      profile=profile)
@@ -495,6 +496,20 @@ class AgentMemoryTests(unittest.TestCase):
         agent=self.create();agent.step()
         self.HumanInputController.return_value.hold_mouse.assert_called_once_with(button="left",duration=3)
         self.assertEqual(agent.brain.assess.call_count,2)
+
+    def test_mining_profile_requires_fresh_crosshair_target_evidence(self):
+        from omnigamer.perception import FrameFacts, VisualAssessment
+        facts=FrameFacts(scene="gameplay",pitch="level",safe_footing=True,
+                         target_at_crosshair=None)
+        self.VisionBrain.return_value.assess.return_value=VisualAssessment(
+            before=facts, after=facts, confidence=.95,
+            evidence="Solid footing, target under the crosshair is unclear.", result="unknown")
+        self.VisionBrain.return_value.decide.return_value=BrainDecision(action_type="mine",duration=3)
+        agent=self.create(mine_requires_target_at_crosshair=True)
+        result=agent.step()
+        self.HumanInputController.return_value.hold_mouse.assert_not_called()
+        self.assertEqual(result["decision"]["action_type"], "wait")
+        self.assertIn("под прицелом", agent.last_guard_reason)
 
     def test_unknown_check_retains_executed_experience_without_promoting_success(self):
         self.addCleanup(setattr,self.module.config,"verification_interval",self.module.config.verification_interval)

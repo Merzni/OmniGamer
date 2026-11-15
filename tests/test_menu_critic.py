@@ -8,6 +8,11 @@ from omnigamer.profiles import load_profile
 
 
 class MenuCriticTests(unittest.TestCase):
+    def test_gameplay_assessment_schema_requires_crosshair_target_field(self):
+        schema=VisionBrain()._assessment_format(False)["json_schema"]["schema"]["$defs"]["FrameFacts"]
+        self.assertIn("target_at_crosshair",schema["required"])
+        self.assertIn("target_at_crosshair",schema["properties"])
+
     def assess(self, facts):
         payload={"before":{"scene":"main_menu"},"after":facts,"confidence":.95,
                  "menu_action_succeeded":False,"evidence":"The world selection menu is visible."}

@@ -32,6 +32,20 @@ class CameraGuardTests(unittest.TestCase):
             FrameFacts(scene="gameplay",pitch="level"), grounded_confident=True)
         self.assertEqual(action["action_type"], "mine")
 
+    def test_profile_can_require_visible_target_under_crosshair(self):
+        action, reason = CameraGuard().filter(dict(action_type="mine"),
+            FrameFacts(scene="gameplay", pitch="level", safe_footing=True,
+                       target_at_crosshair=None),
+            grounded_confident=True, require_target_at_crosshair=True)
+        self.assertEqual(action["action_type"], "wait")
+        self.assertIn("под прицелом", reason)
+
+        action, _ = CameraGuard().filter(dict(action_type="mine"),
+            FrameFacts(scene="gameplay", pitch="level", safe_footing=True,
+                       target_at_crosshair=True),
+            grounded_confident=True, require_target_at_crosshair=True)
+        self.assertEqual(action["action_type"], "mine")
+
     def test_extreme_vertical_command_is_bounded(self):
         guard = CameraGuard()
         total = 0

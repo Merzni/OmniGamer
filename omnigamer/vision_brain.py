@@ -446,15 +446,20 @@ class VisionBrain:
             "Do not infer caves from darkness, flying from sky, enemies from a green hand, or tools from intent. "
             "open_ground=true only when safe open terrain and usable ground ahead are visible; false in a pit/wall, "
             "safe_footing=true only when the feet are supported on solid ground with no drop being dug below; "
+            "target_at_crosshair=true only when the intended visible target surface occupies the exact image center (50%,50%); "
+            "treat that center as the crosshair aim point even if its small reticle glyph is not visible. "
+            "false when the center is visibly on another surface, null when the target relation is ambiguous. "
+            "Use visible pixels, not the actor's target label or a past claim. "
             "null if unsure. pitch=up if sky dominates, down if ground beneath feet dominates, level for a usable forward view. "
             "Read only visible item slots. Mark visible_items_readable=false if counts or names are unclear; "
             "do not invent an empty inventory or item identities. "
             "Copy visible slot counts exactly. A turn or changed pixels is not goal progress. Digging beneath feet "
             "and falling into a pit is regressed, not progress. Give uncertainty and lower confidence when evidence is weak. "
             "Return ONLY compact valid JSON with this structure: "
-            '{"before":{"scene":"gameplay","pitch":"unknown","open_ground":null,"safe_footing":null,"visible_items_readable":false,'
-            '"items":[],"hand_item":"unknown"},"after":{"scene":"gameplay","pitch":"unknown",'
-            '"open_ground":null,"safe_footing":null,"visible_items_readable":false,"items":[],"hand_item":"unknown"},'
+            '{"before":{"scene":"gameplay","pitch":"unknown","open_ground":null,"safe_footing":null,'
+            '"target_at_crosshair":null,"visible_items_readable":false,"items":[],"hand_item":"unknown"},'
+            '"after":{"scene":"gameplay","pitch":"unknown","open_ground":null,"safe_footing":null,'
+            '"target_at_crosshair":null,"visible_items_readable":false,"items":[],"hand_item":"unknown"},'
             '"result":"unknown","confidence":0.2,"evidence":"brief visible comparison",'
             '"uncertainty":"what cannot be verified"}. '
             "scene: menu/loading/gameplay/unknown; pitch: up/down/level/unknown; "
@@ -496,7 +501,13 @@ class VisionBrain:
                 system += (" This profile enables a recognized world-list UI adapter. Selecting a world requires its "
                            "row outline AND enabled Play; a highlighted Create New World button is not a selected row. "
                            "Gray Play text is disabled; report selection_visible and play_enabled separately.")
-        content = [{"type": "text", "text": f"Play context: {context}\nExecuted action: {json.dumps(action, ensure_ascii=False)}"}]
+        if action.get("verification_only"):
+            system += (
+                " This is a verification-only observation: no action was executed between the frames. "
+                "Describe the visible current state; do not infer that the proposed action happened.")
+        action_label = "Proposed action (not executed)" if action.get("verification_only") else "Executed action"
+        content = [{"type": "text", "text": f"Play context: {context}\n{action_label}: "
+                    f"{json.dumps(action, ensure_ascii=False)}"}]
         if is_menu and world_adapter:
             content.append({"type":"text","text":"Measured pixel cues on a recognized world-list layout "
                 "(row outline, Play enabled; null means layout not recognized): BEFORE="+
@@ -627,7 +638,8 @@ class VisionBrain:
         schema["properties"]["uncertainty"]["maxLength"]=80
         facts=schema["$defs"]["FrameFacts"]
         facts["required"]=["scene","menu_id","menu_state","selection_visible","play_enabled"] if is_menu else [
-            "scene","pitch","open_ground","safe_footing","visible_items_readable","items"]
+            "scene","pitch","open_ground","safe_footing","target_at_crosshair",
+            "visible_items_readable","items"]
         return result
 
     def _parse_json_response(self, text: str) -> BrainDecision:
