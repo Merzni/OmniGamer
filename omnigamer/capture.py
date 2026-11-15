@@ -3,7 +3,7 @@ import ctypes
 from ctypes import wintypes
 import time
 from typing import Optional, List, Dict, Tuple
-from PIL import Image
+from PIL import Image, ImageGrab
 import mss
 import win32gui
 import win32service
@@ -148,11 +148,28 @@ class WindowCapture:
         height = bottom - top
         
         bbox = {"left": left, "top": top, "width": width, "height": height}
-        # MSS handles are thread-local; FastAPI may use a different worker each step.
-        with mss.mss() as sct:
-            raw = sct.grab(bbox)
-        img = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
-        return img
+        try:
+            # MSS handles are thread-local; FastAPI may use a different worker each step.
+            with mss.mss() as sct:
+                raw = sct.grab(bbox)
+            return Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
+        except Exception as screen_error:
+            if not self.hwnd:
+                raise
+            try:
+                # Pillow uses a target-window capture path that can work when desktop
+                # BitBlt is unavailable for an accelerated window.
+                img = ImageGrab.grab(window=int(self.hwnd)).convert("RGB")
+                if img.size != (width, height):
+                    raise RuntimeError(
+                        f"Window capture size mismatch: expected {width}x{height}, "
+                        f"got {img.width}x{img.height}")
+                return img
+            except Exception as window_error:
+                raise RuntimeError(
+                    f"Screen capture failed ({type(screen_error).__name__}: {screen_error}); "
+                    f"window capture fallback failed ({type(window_error).__name__}: {window_error})"
+                ) from window_error
 
     def norm_to_screen(self, norm_x: float, norm_y: float) -> Tuple[int, int]:
         """Convert normalized (0..1000, 0..1000) coords to absolute screen pixels."""
