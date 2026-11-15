@@ -217,6 +217,33 @@ class ApproachTargetTests(unittest.TestCase):
         self.assertTrue(skill._selection_uncertain)
         self.assertEqual(skill._last_center, original_center)
 
+    def test_target_tracker_uses_box_scale_to_break_close_center_tie(self):
+        skill, _, _ = self.make_skill([[]], settings=ApproachTargetSettings(
+            track_max_center_shift=0.2, track_ambiguity_margin=0.02))
+        original = box(0.5, 0.2)
+        skill._select({"boxes": [original]})
+        similar_shape = box(0.53, 0.2)
+        nearer_but_mismatched = {"x1": 0.36, "x2": 0.66, "y1": 0.2, "y2": 0.8,
+                                 "score": 0.99}
+
+        selected = skill._select({"boxes": [nearer_but_mismatched, similar_shape]})
+
+        self.assertEqual(selected, similar_shape)
+        self.assertFalse(skill._selection_uncertain)
+        self.assertAlmostEqual(skill._last_center[0], 0.53)
+
+    def test_target_tracker_ignores_geometry_match_outside_center_shift_limit(self):
+        skill, _, _ = self.make_skill([[]], settings=ApproachTargetSettings(
+            track_max_center_shift=0.1, track_ambiguity_margin=0.005))
+        original = box(0.5, 0.2)
+        skill._select({"boxes": [original]})
+        eligible = {"x1": 0.44, "x2": 0.74, "y1": 0.2, "y2": 0.8, "score": 0.9}
+        beyond_limit = box(0.61, 0.2)
+
+        selected = skill._select({"boxes": [beyond_limit, eligible]})
+
+        self.assertEqual(selected, eligible)
+
     def test_repeated_ambiguous_tracking_is_unconfirmed_without_blind_movement(self):
         original = box(0.5, 0.2)
         ambiguous = [box(0.45, 0.2), box(0.55, 0.2)]

@@ -296,16 +296,21 @@ class ApproachTargetSkill:
         if self._last_center is None:
             selected = max(boxes, key=lambda item: item["score"])
         else:
-            ranked = sorted(((math.hypot(
-                (item["x1"] + item["x2"]) / 2 - self._last_center[0],
-                (item["y1"] + item["y2"]) / 2 - self._last_center[1]), item)
-                for item in boxes), key=lambda row: row[0])
-            nearest_distance, selected = ranked[0]
-            if nearest_distance > self.settings.track_max_center_shift:
+            previous = self._last_valid_box
+            eligible = []
+            for item in boxes:
+                center_distance = math.hypot(
+                    (item["x1"] + item["x2"]) / 2 - self._last_center[0],
+                    (item["y1"] + item["y2"]) / 2 - self._last_center[1])
+                if center_distance <= self.settings.track_max_center_shift:
+                    eligible.append((self._track_cost(item, previous), item, center_distance))
+            if not eligible:
                 self._selection_uncertain_streak = 0
                 return None
-            if (len(ranked) > 1 and
-                    ranked[1][0] - nearest_distance <= self.settings.track_ambiguity_margin):
+            ranked = sorted(eligible, key=lambda row: row[0])
+            _, selected, _ = ranked[0]
+            if (len(ranked) > 1 and ranked[1][0] - ranked[0][0] <=
+                    self.settings.track_ambiguity_margin):
                 self._selection_uncertain = True
                 self._selection_uncertain_streak += 1
                 return None
@@ -315,6 +320,30 @@ class ApproachTargetSkill:
         self._last_box = dict(selected)
         self._last_valid_box = dict(selected)
         return dict(selected)
+
+    def _track_cost(self, candidate, previous):
+        """Rank candidates by motion first, then use box shape/overlap as weak cues."""
+        previous = previous or {"x1": self._last_center[0], "x2": self._last_center[0],
+                                "y1": self._last_center[1], "y2": self._last_center[1]}
+        center_distance = math.hypot(
+            (candidate["x1"] + candidate["x2"] - previous["x1"] - previous["x2"]) / 2,
+            (candidate["y1"] + candidate["y2"] - previous["y1"] - previous["y2"]) / 2)
+        previous_width = max(1e-6, previous["x2"] - previous["x1"])
+        previous_height = max(1e-6, previous["y2"] - previous["y1"])
+        candidate_width = max(1e-6, candidate["x2"] - candidate["x1"])
+        candidate_height = max(1e-6, candidate["y2"] - candidate["y1"])
+        scale_delta = (abs(math.log(candidate_width / previous_width)) +
+                       abs(math.log(candidate_height / previous_height))) / 2
+        intersection_width = max(0.0, min(candidate["x2"], previous["x2"]) -
+                                 max(candidate["x1"], previous["x1"]))
+        intersection_height = max(0.0, min(candidate["y2"], previous["y2"]) -
+                                  max(candidate["y1"], previous["y1"]))
+        intersection = intersection_width * intersection_height
+        union = candidate_width * candidate_height + previous_width * previous_height - intersection
+        iou = intersection / union if union > 0 else 0.0
+        # Keep image-space center motion dominant. Shape and IoU only break ties;
+        # they can change sharply during a camera turn or approach.
+        return center_distance + min(scale_delta, 4.0) * 0.04 + (1.0 - iou) * 0.015
 
     def _close_and_centered(self, box):
         if not box:
