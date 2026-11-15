@@ -191,6 +191,31 @@ class ApproachTargetTests(unittest.TestCase):
         nearby = box(0.58, 0.2)
         self.assertEqual(skill._select({"boxes": [nearby]}), nearby)
 
+    def test_target_tracker_reports_symmetric_candidates_as_uncertain(self):
+        skill, _, _ = self.make_skill([[]], settings=ApproachTargetSettings(
+            track_max_center_shift=0.2, track_ambiguity_margin=0.02))
+        original = box(0.5, 0.2)
+        self.assertEqual(skill._select({"boxes": [original]}), original)
+        original_center = skill._last_center
+        left, right = box(0.45, 0.2), box(0.55, 0.2)
+        self.assertIsNone(skill._select({"boxes": [left, right]}))
+        self.assertTrue(skill._selection_uncertain)
+        self.assertEqual(skill._last_center, original_center)
+
+    def test_repeated_ambiguous_tracking_is_unconfirmed_without_blind_movement(self):
+        original = box(0.5, 0.2)
+        ambiguous = [box(0.45, 0.2), box(0.55, 0.2)]
+        skill, controls, _ = self.make_skill(
+            [[original], ambiguous, ambiguous],
+            settings=ApproachTargetSettings(track_max_center_shift=0.2,
+                                            track_ambiguity_margin=0.02))
+        result = skill.run()
+        self.assertEqual(result.state, "UNCERTAIN")
+        self.assertEqual(result.reason, "ambiguous_target_tracking")
+        self.assertEqual([call for call in controls.calls if call[0] == "key"],
+                         [("key", "w", 0.5)])
+        self.assertTrue(controls.released)
+
     def test_profile_action_budget_counts_camera_commands(self):
         settings = ApproachTargetSettings(max_impulses=1)
         skill, controls, _ = self.make_skill([[box(0.8, 0.2)]], settings=settings)

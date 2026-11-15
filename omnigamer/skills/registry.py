@@ -63,7 +63,7 @@ def _approach_result(result: ApproachTargetResult) -> SkillResult:
     state = result.state.upper()
     if state == "REACHED":
         status, result_code = SkillStatus.SUCCESS, "SUCCESS"
-    elif state == "REACHED_UNCONFIRMED":
+    elif state in {"REACHED_UNCONFIRMED", "UNCERTAIN"}:
         status, result_code = SkillStatus.UNCONFIRMED, "UNCONFIRMED"
     elif state == "ABORT":
         status, result_code = SkillStatus.ABORT, "ABORT"

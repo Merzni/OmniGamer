@@ -25,6 +25,7 @@ class ApproachTargetSettings:
     reach_center_stability: float = config.approach_target_reach_center_stability
     reach_crosshair_margin: float = config.approach_target_reach_crosshair_margin
     track_max_center_shift: float = config.approach_target_track_max_center_shift
+    track_ambiguity_margin: float = 0.02
     max_look_counts: int = config.approach_target_max_look_counts
     close_target_held_impulses: int = config.approach_target_close_target_held_impulses
     close_target_held_duration: float = config.approach_target_close_target_held_duration
@@ -54,6 +55,7 @@ class ApproachTargetSettings:
             "reach_center_stability": "approach_reach_center_stability",
             "reach_crosshair_margin": "approach_reach_crosshair_margin",
             "track_max_center_shift": "approach_track_max_center_shift",
+            "track_ambiguity_margin": "approach_track_ambiguity_margin",
             "score_min": "detector_score_min",
             "max_box_area": "detector_max_box_area",
         }
@@ -74,6 +76,7 @@ class ApproachTargetSettings:
         if (not 0 < self.reach_height <= 1 or not 0 < self.max_box_area <= 1
                 or not 0 < self.reach_min_width <= 1 or self.max_look_counts < 10
                 or not 0 < self.track_max_center_shift <= 1
+                or not 0 <= self.track_ambiguity_margin < self.track_max_center_shift
                 or not 0 <= self.reach_crosshair_margin < 0.25):
             raise ValueError("reach_height and max_box_area must be in (0,1]")
         if self.max_impulses < 1 or self.max_seconds <= 0:
@@ -158,6 +161,8 @@ class ApproachTargetSkill:
         self._last_box = None
         self._last_valid_box = None
         self._last_center = None
+        self._selection_uncertain = False
+        self._selection_uncertain_streak = 0
         self._missing_frames = 0
         self._lost_search_turns = 0
         self._aligning = False
@@ -289,19 +294,27 @@ class ApproachTargetSkill:
 
     def _select(self, detection):
         boxes = detection.get("boxes", []) if detection else []
+        self._selection_uncertain = False
         if not boxes:
+            self._selection_uncertain_streak = 0
             return None
         if self._last_center is None:
             selected = max(boxes, key=lambda item: item["score"])
         else:
-            selected = min(boxes, key=lambda item: math.hypot(
+            ranked = sorted(((math.hypot(
                 (item["x1"] + item["x2"]) / 2 - self._last_center[0],
-                (item["y1"] + item["y2"]) / 2 - self._last_center[1]))
-            center = ((selected["x1"] + selected["x2"]) / 2,
-                      (selected["y1"] + selected["y2"]) / 2)
-            if math.hypot(center[0] - self._last_center[0],
-                          center[1] - self._last_center[1]) > self.settings.track_max_center_shift:
+                (item["y1"] + item["y2"]) / 2 - self._last_center[1]), item)
+                for item in boxes), key=lambda row: row[0])
+            nearest_distance, selected = ranked[0]
+            if nearest_distance > self.settings.track_max_center_shift:
+                self._selection_uncertain_streak = 0
                 return None
+            if (len(ranked) > 1 and
+                    ranked[1][0] - nearest_distance <= self.settings.track_ambiguity_margin):
+                self._selection_uncertain = True
+                self._selection_uncertain_streak += 1
+                return None
+        self._selection_uncertain_streak = 0
         self._last_center = ((selected["x1"] + selected["x2"]) / 2,
                              (selected["y1"] + selected["y2"]) / 2)
         self._last_box = dict(selected)
@@ -470,7 +483,10 @@ class ApproachTargetSkill:
                               "duration": duration}
                     state = "JUMP_RECOVERY"
                 elif before_box is None:
-                    if self._close_target_held_active:
+                    if self._selection_uncertain:
+                        state = "TRACK_UNCERTAIN"
+                        action = {"type": "observe", "duration": 0}
+                    elif self._close_target_held_active:
                         state = "CLOSE_TARGET_HELD"
                         if self._close_target_held_remaining <= 0:
                             terminal = ("REACHED_UNCONFIRMED", "target_occluded_after_close_approach", None)
@@ -646,6 +662,8 @@ class ApproachTargetSkill:
 
                 if self._reach_streak >= 2:
                     terminal = ("REACHED", "top_edge_centered_stable", "top_edge_centered_stable")
+                elif self._selection_uncertain_streak >= 2:
+                    terminal = ("UNCERTAIN", "ambiguous_target_tracking", None)
 
                 if terminal:
                     state, action_reason, criterion = terminal

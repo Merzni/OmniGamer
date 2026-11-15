@@ -31,6 +31,7 @@ class SkillRegistryTests(unittest.TestCase):
 
         self.assertEqual(_approach_result(raw("REACHED")).status, SkillStatus.SUCCESS)
         self.assertEqual(_approach_result(raw("REACHED_UNCONFIRMED")).status, SkillStatus.UNCONFIRMED)
+        self.assertEqual(_approach_result(raw("UNCERTAIN")).status, SkillStatus.UNCONFIRMED)
         self.assertEqual(_approach_result(raw("ABORT")).status, SkillStatus.ABORT)
         self.assertEqual(_approach_result(raw("LOST")).status, SkillStatus.FAILED)
 
