@@ -1,6 +1,7 @@
 """Validated goal plans, bounded execution, and per-game episodic outcomes."""
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 from copy import deepcopy
@@ -137,6 +138,12 @@ class SkillOutcomeStore:
                 ts REAL NOT NULL, run_id TEXT NOT NULL)""")
             conn.execute("CREATE INDEX IF NOT EXISTS ix_skill_outcomes_lookup "
                          "ON skill_outcomes(game_id,skill,target)")
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(skill_outcomes)")}
+            for name, sql_type in (("args_json", "TEXT"), ("expected_result", "TEXT"),
+                                   ("success_check", "TEXT")):
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE skill_outcomes ADD COLUMN {name} {sql_type}")
+            conn.commit()
 
     @contextmanager
     def _connection(self):
@@ -146,27 +153,42 @@ class SkillOutcomeStore:
             with closing(sqlite3.connect(self.db_path)) as conn:
                 yield conn
 
-    def record(self, game_id, skill, target, result, duration, run_id):
+    def record(self, game_id, skill, target, result, duration, run_id, *, args=None,
+               expected_result="", success_check=""):
+        args_json = json.dumps(args, ensure_ascii=False, sort_keys=True) if args is not None else None
         with self._connection() as conn:
-            conn.execute("INSERT INTO skill_outcomes(game_id,skill,target,result,duration,ts,run_id) "
-                         "VALUES(?,?,?,?,?,?,?)", (game_id, skill, target, result,
-                         max(0.0, float(duration)), time.time(), run_id))
+            conn.execute("INSERT INTO skill_outcomes(game_id,skill,target,result,duration,ts,run_id,"
+                         "args_json,expected_result,success_check) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                         (game_id, skill, target, result, max(0.0, float(duration)), time.time(),
+                          run_id, args_json, str(expected_result or ""), str(success_check or "")))
             conn.commit()
 
-    def summary(self, game_id, limit=200):
+    def summary(self, game_id, limit=200, max_groups=20):
         with self._connection() as conn:
-            rows = conn.execute("SELECT skill,target,result FROM skill_outcomes WHERE game_id=? "
+            rows = conn.execute("SELECT skill,target,result,args_json,expected_result,success_check "
+                                "FROM skill_outcomes WHERE game_id=? "
                                 "ORDER BY id DESC LIMIT ?", (game_id, limit)).fetchall()
         grouped = {}
-        for skill, target, result in rows:
-            item = grouped.setdefault((skill, target), [0, 0, 0])
+        for skill, target, result, args_json, expected_result, success_check in rows:
+            item = grouped.setdefault((skill, target), [0, 0, 0, None])
             item[1] += 1
-            item[0] += result in {SkillStatus.SUCCESS.value, "SUCCESS_VERIFIED"}
+            is_success = result in {SkillStatus.SUCCESS.value, "SUCCESS_VERIFIED"}
+            item[0] += is_success
             item[2] += result in {SkillStatus.UNCONFIRMED.value, "SUCCESS_REGION_CHANGE",
                                   "REGION_CHANGE_UNCONFIRMED"}
-        return [{"skill": skill, "target": target, "successes": values[0], "attempts": values[1],
-                 "uncertain": values[2], "success_rate": round(values[0] / values[1], 3)}
-                for (skill, target), values in sorted(grouped.items())]
+            if is_success and item[3] is None and args_json:
+                try:
+                    args = json.loads(args_json)
+                except (TypeError, ValueError):
+                    args = None
+                if isinstance(args, dict):
+                    item[3] = {"args": args, "expected_result": expected_result or "",
+                               "success_check": success_check or ""}
+        summaries = [{"skill": skill, "target": target, "successes": values[0], "attempts": values[1],
+                      "uncertain": values[2], "success_rate": round(values[0] / values[1], 3),
+                      "verified_example": values[3]}
+                     for (skill, target), values in sorted(grouped.items())]
+        return summaries[:max(1, int(max_groups))]
 
 
 class GoalPlanner:
@@ -343,7 +365,7 @@ class GoalExecutor:
             duration = last_result.get("duration_seconds", max(0.0, self.clock() - begin))
             self.store.record(self.game_id, name, goal,
                               last_result.get("result_code") or last_result.get("status", "FAILED"),
-                              duration, self.run_id)
+                              duration, self.run_id, args=params)
             if self.logger:
                 self.logger({"event": "local_recovery_skill", "recovery": "approach",
                              "skill": name, "args": params, "result": last_result})
@@ -428,7 +450,9 @@ class GoalExecutor:
                 duration = result.get("duration_seconds", max(0.0, self.clock() - begin))
                 if not self.dry_run:
                     self.store.record(self.game_id, step.skill, goal,
-                                      result.get("result_code") or status, duration, self.run_id)
+                                      result.get("result_code") or status, duration, self.run_id,
+                                      args=params, expected_result=step.expected_result,
+                                      success_check=step.success_check)
                 if self.logger:
                     self.logger({"event": "skill_result", "skill": step.skill,
                                  "args": step.args, "result": result})

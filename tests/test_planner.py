@@ -1,4 +1,6 @@
+import sqlite3
 import tempfile
+from contextlib import closing
 import unittest
 from pathlib import Path
 from unittest.mock import Mock
@@ -114,14 +116,38 @@ class GoalPlannerTests(unittest.TestCase):
     def test_outcome_store_separates_games_and_summarizes_success_rate(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = SkillOutcomeStore(Path(tmp) / "outcomes.db")
-            store.record("a", "move_pulse", "move", "SUCCESS", 1, "r1")
+            store.record("a", "move_pulse", "move", "SUCCESS_VERIFIED", 1, "r1",
+                         args={"direction": "forward", "seconds": 0.5},
+                         expected_result="near object", success_check="target remains centered")
             store.record("a", "move_pulse", "move", "FAILED", 2, "r2")
             store.record("a", "move_pulse", "move", "SUCCESS_REGION_CHANGE", 3, "r4")
             store.record("b", "move_pulse", "move", "SUCCESS", 1, "r3")
             self.assertEqual(store.summary("a"), [{"skill": "move_pulse", "target": "move",
                                                     "successes": 1, "attempts": 3, "uncertain": 1,
-                                                    "success_rate": 0.333}])
+                                                    "success_rate": 0.333,
+                                                    "verified_example": {"args": {
+                                                        "direction": "forward", "seconds": 0.5},
+                                                        "expected_result": "near object",
+                                                        "success_check": "target remains centered"}}])
             self.assertEqual(store.summary("b")[0]["attempts"], 1)
+
+    def test_skill_outcome_store_additively_migrates_legacy_schema(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "legacy.db"
+            with closing(sqlite3.connect(path)) as conn:
+                with conn:
+                    conn.execute("CREATE TABLE skill_outcomes (id INTEGER PRIMARY KEY, game_id TEXT NOT NULL, "
+                                 "skill TEXT NOT NULL, target TEXT NOT NULL, result TEXT NOT NULL, "
+                                 "duration REAL NOT NULL, ts REAL NOT NULL, run_id TEXT NOT NULL)")
+            store = SkillOutcomeStore(path)
+            with closing(sqlite3.connect(path)) as conn:
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(skill_outcomes)")}
+            self.assertTrue({"args_json", "expected_result", "success_check"}.issubset(columns))
+            store.record("sim", "turn", "look around", "SUCCESS", 0.2, "r1",
+                         args={"direction": "left", "amount": 20},
+                         expected_result="new area visible", success_check="landmark changed")
+            example = store.summary("sim")[0]["verified_example"]
+            self.assertEqual(example["args"], {"direction": "left", "amount": 20})
 
     def test_dry_run_logs_would_send_and_never_calls_executor(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -169,6 +195,7 @@ class GoalPlannerTests(unittest.TestCase):
             summary = store.summary("sim")[0]
             self.assertEqual(summary["successes"], 0)
             self.assertEqual(summary["uncertain"], 1)
+            self.assertIsNone(summary["verified_example"])
 
     def test_success_check_can_confirm_or_reject_region_delta(self):
         class Assessment:
