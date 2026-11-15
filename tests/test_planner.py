@@ -192,7 +192,9 @@ class GoalPlannerTests(unittest.TestCase):
                                                     "successes": 1, "attempts": 3, "uncertain": 1,
                                                     "success_rate": 0.333,
                                                     "verified_example": None}])
-            self.assertEqual(store.summary("b")[0]["attempts"], 1)
+            self.assertEqual((store.summary("b")[0]["successes"],
+                              store.summary("b")[0]["attempts"],
+                              store.summary("b")[0]["success_rate"]), (0, 1, 0.0))
 
     def test_latest_success_reenables_example_after_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -241,18 +243,18 @@ class GoalPlannerTests(unittest.TestCase):
 
             store = SkillOutcomeStore(path)
             summary = store.summary("sim")[0]
-            self.assertEqual((summary["successes"], summary["attempts"]), (1, 1))
+            self.assertEqual((summary["successes"], summary["attempts"]), (0, 1))
             self.assertIsNone(summary["verified_example"])
 
             store.record("sim", "move_pulse", "move", "SUCCESS_VERIFIED", 0.4, "new",
                          args={"direction": "forward", "seconds": 0.4},
                          expected_result="nearer", success_check="target is closer")
             reopened = SkillOutcomeStore(path).summary("sim")[0]
-            self.assertEqual((reopened["successes"], reopened["attempts"]), (2, 2))
+            self.assertEqual((reopened["successes"], reopened["attempts"]), (1, 2))
             self.assertEqual(reopened["verified_example"]["args"],
                              {"direction": "forward", "seconds": 0.4})
 
-    def test_generic_success_counts_but_never_emits_verified_example(self):
+    def test_generic_success_is_not_an_outcome_or_verified_example(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = SkillOutcomeStore(Path(tmp) / "outcomes.db")
             store.record("sim", "move_pulse", "move", "SUCCESS_VERIFIED", 1, "r1",
@@ -263,7 +265,7 @@ class GoalPlannerTests(unittest.TestCase):
                          expected_result="nearer", success_check="target is closer")
             summary = store.summary("sim")[0]
             self.assertEqual((summary["successes"], summary["attempts"], summary["success_rate"]),
-                             (2, 2, 1.0))
+                             (1, 2, 0.5))
             self.assertIsNone(summary["verified_example"])
 
     def test_dry_run_logs_would_send_and_never_calls_executor(self):
