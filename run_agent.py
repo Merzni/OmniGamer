@@ -192,11 +192,24 @@ def main():
                                 **row}, ensure_ascii=False, separators=(",", ":")) + "\n")
                     if row.get("event") == "would_send":
                         print("would send: " + json.dumps(row, ensure_ascii=False))
+
+                def verify_skill_result(step, before, after, result, timeout_seconds):
+                    action = {"action_type": "interact_until_change",
+                              "parameters": step.args,
+                              "expected_result": step.expected_result,
+                              "success_check": step.success_check}
+                    context = (f"Goal step: {step.skill}. Expected result: {step.expected_result}. "
+                               f"Required visible success check: {step.success_check}. "
+                               "A pixel or region change alone is not sufficient evidence.")
+                    return agent._call_interruptibly(agent.brain.assess, before, after, action, context,
+                                                     timeout_seconds=timeout_seconds)
+
                 executor = GoalExecutor(
                     planner, registry, outcome_store, profile=profile, game_id=agent.game_id,
                     execute_skill=execute_skill, frame_provider=agent.capture.grab_frame,
                     stop_check=agent._check_stop, dry_run=args.dry_run,
                     input_action_budget=None if args.dry_run else input_action_budget,
+                    result_verifier=verify_skill_result,
                     logger=record_goal_event, detector=detector,
                 )
                 try:

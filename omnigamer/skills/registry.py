@@ -163,7 +163,7 @@ def default_registry():
                   60, ("detector", "input", "camera_guard"), execute_search_target),
         SkillSpec("interact_until_change", "Repeat a configured interaction until a named screen region changes.",
                   InteractUntilChangeParams, ("The named region and action exist in the profile.",),
-                  ("SUCCESS_REGION_CHANGE", "FAILED", "ABORT", "UNCONFIRMED"),
+                  ("REGION_CHANGE_UNCONFIRMED", "SUCCESS_VERIFIED", "FAILED", "ABORT", "UNCONFIRMED"),
                   60, ("input", "capture", "camera_guard"), execute_interact_until_change),
         SkillSpec("move_pulse", "Hold a configured movement direction for one bounded pulse.",
                   MovePulseParams, ("The movement direction exists in the profile.",),

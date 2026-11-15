@@ -159,11 +159,13 @@ class SkillOutcomeStore:
                                 "ORDER BY id DESC LIMIT ?", (game_id, limit)).fetchall()
         grouped = {}
         for skill, target, result in rows:
-            item = grouped.setdefault((skill, target), [0, 0])
+            item = grouped.setdefault((skill, target), [0, 0, 0])
             item[1] += 1
-            item[0] += result == SkillStatus.SUCCESS.value or result == "SUCCESS_REGION_CHANGE"
+            item[0] += result in {SkillStatus.SUCCESS.value, "SUCCESS_VERIFIED"}
+            item[2] += result in {SkillStatus.UNCONFIRMED.value, "SUCCESS_REGION_CHANGE",
+                                  "REGION_CHANGE_UNCONFIRMED"}
         return [{"skill": skill, "target": target, "successes": values[0], "attempts": values[1],
-                 "success_rate": round(values[0] / values[1], 3)}
+                 "uncertain": values[2], "success_rate": round(values[0] / values[1], 3)}
                 for (skill, target), values in sorted(grouped.items())]
 
 
@@ -233,7 +235,7 @@ class GoalExecutor:
     def __init__(self, planner, registry, outcome_store, *, profile, game_id,
                  execute_skill, frame_provider, stop_check, dry_run=False,
                  max_replans=None, max_steps=None, input_action_budget=None,
-                 run_id=None, clock=time.monotonic,
+                 run_id=None, clock=time.monotonic, result_verifier=None,
                  logger=None, detector=None):
         self.planner, self.registry, self.store = planner, registry, outcome_store
         self.profile, self.game_id = profile, game_id
@@ -242,7 +244,63 @@ class GoalExecutor:
         self.max_replans = config.goal_max_replans if max_replans is None else max_replans
         self.max_steps = config.goal_max_skill_steps if max_steps is None else max_steps
         self.input_action_budget = input_action_budget
+        self.result_verifier = result_verifier
         self.run_id, self.clock, self.logger, self.detector = run_id or uuid4().hex, clock, logger, detector
+
+    def _verify_result(self, step, result, before, after, timeout_seconds):
+        """Resolve a region-delta candidate only when a separate check supports it."""
+        if result.get("result_code") not in {"REGION_CHANGE_UNCONFIRMED", "SUCCESS_REGION_CHANGE"}:
+            return result
+        evidence = dict(result.get("evidence") or {})
+        if timeout_seconds <= 0:
+            return {**result, "status": SkillStatus.UNCONFIRMED.value,
+                    "result_code": "UNCONFIRMED", "reason": "success_check_time_budget_exhausted",
+                    "evidence": {**evidence, "verification": {"result": "unknown",
+                                                                    "source": "time_budget"}}}
+        if self.result_verifier is None:
+            return {**result, "status": SkillStatus.UNCONFIRMED.value,
+                    "result_code": "UNCONFIRMED", "reason": "region_changed_without_success_check",
+                    "evidence": {**evidence, "verification": {"result": "unknown",
+                                                                    "source": "no_verifier"}}}
+        verify_started = self.clock()
+        try:
+            assessment = self.result_verifier(step, before, after, result, timeout_seconds)
+            verify_duration = max(0.0, self.clock() - verify_started)
+            usable = bool(getattr(assessment, "usable", False))
+            verdict = getattr(assessment, "result", "unknown")
+            confidence = float(getattr(assessment, "confidence", 0.0))
+            proof = str(getattr(assessment, "evidence", ""))
+            verification = {"result": verdict, "confidence": confidence,
+                            "evidence": proof,
+                            "evidence_source": getattr(assessment, "evidence_source", "unknown"),
+                            "usable": usable, "duration_seconds": verify_duration}
+            total_duration = float(result.get("duration_seconds", 0.0)) + verify_duration
+            if verify_duration > timeout_seconds:
+                return {**result, "status": SkillStatus.UNCONFIRMED.value,
+                        "result_code": "UNCONFIRMED", "reason": "success_check_time_budget_exhausted",
+                        "duration_seconds": total_duration,
+                        "evidence": {**evidence, "verification": verification}}
+            if usable and verdict == "progress":
+                return {**result, "status": SkillStatus.SUCCESS.value,
+                        "result_code": "SUCCESS_VERIFIED", "reason": "success_check_confirmed",
+                        "duration_seconds": total_duration,
+                        "evidence": {**evidence, "verification": verification}}
+            if usable and verdict in {"blocked", "regressed"}:
+                return {**result, "status": SkillStatus.FAILED.value,
+                        "result_code": "VERIFICATION_FAILED", "reason": verdict,
+                        "duration_seconds": total_duration,
+                        "evidence": {**evidence, "verification": verification}}
+            return {**result, "status": SkillStatus.UNCONFIRMED.value,
+                    "result_code": "UNCONFIRMED", "reason": "success_check_uncertain",
+                    "duration_seconds": total_duration,
+                    "evidence": {**evidence, "verification": verification}}
+        except Exception as exc:
+            return {**result, "status": SkillStatus.UNCONFIRMED.value,
+                    "result_code": "UNCONFIRMED", "reason": "success_check_error",
+                    "duration_seconds": float(result.get("duration_seconds", 0.0)) +
+                        max(0.0, self.clock() - verify_started),
+                    "evidence": {**evidence, "verification": {"result": "unknown",
+                        "source": "error", "error": f"{type(exc).__name__}: {exc}"[:300]}}}
 
     def _finish(self, result):
         if self.input_action_budget is not None:
@@ -290,7 +348,7 @@ class GoalExecutor:
                 self.logger({"event": "local_recovery_skill", "recovery": "approach",
                              "skill": name, "args": params, "result": last_result})
             used += 1
-            if last_result.get("status") not in {SkillStatus.SUCCESS.value, "SUCCESS_REGION_CHANGE"}:
+            if last_result.get("status") != SkillStatus.SUCCESS.value:
                 return last_result, used
         return last_result, used
 
@@ -355,8 +413,17 @@ class GoalExecutor:
                     if self.logger:
                         self.logger({"event": "would_send", **resolved})
                 else:
+                    verification_before = (self.frame_provider() if self.result_verifier and
+                                           step.skill == "interact_until_change" else None)
                     result = self.execute_skill(spec, params, available)
                     result = result.model_dump() if hasattr(result, "model_dump") else result
+                    if (step.skill == "interact_until_change" and result.get("result_code") in {
+                            "REGION_CHANGE_UNCONFIRMED", "SUCCESS_REGION_CHANGE"}):
+                        verification_after = self.frame_provider() if self.result_verifier else None
+                        verification_budget = self.profile.motion_limits.max_run_seconds - (
+                            self.clock() - started)
+                        result = self._verify_result(step, result, verification_before,
+                                                     verification_after, verification_budget)
                 status = result.get("status", "FAILED")
                 duration = result.get("duration_seconds", max(0.0, self.clock() - begin))
                 if not self.dry_run:
@@ -367,19 +434,18 @@ class GoalExecutor:
                                  "args": step.args, "result": result})
                 steps_used += 1
                 if (self.input_action_budget is not None and self.input_action_budget.exhausted
-                        and status not in {SkillStatus.SUCCESS.value, "SUCCESS_REGION_CHANGE"}):
+                        and status != SkillStatus.SUCCESS.value):
                     return self._finish({"status": "FAILED", "reason": "max_actions", "steps": steps_used})
                 if status in {SkillStatus.ABORT.value, "ABORT"}:
                     return self._finish({"status": "ABORT", "reason": result.get("reason", "aborted"), "steps": steps_used})
-                if status not in {SkillStatus.SUCCESS.value, "SUCCESS_REGION_CHANGE"}:
+                if status != SkillStatus.SUCCESS.value:
                     if (step.skill == "approach_target"
                             and result.get("reason") in {
                                 "blocked_after_side_step", "target_not_reacquired"}):
                         recovered, recovery_steps = self._recover_blocked_approach(
                             goal, params["target_text"], started, steps_used)
                         steps_used += recovery_steps
-                        if recovered and recovered.get("status") in {
-                                SkillStatus.SUCCESS.value, "SUCCESS_REGION_CHANGE"}:
+                        if recovered and recovered.get("status") == SkillStatus.SUCCESS.value:
                             continue
                         if recovered:
                             result = recovered

@@ -298,9 +298,10 @@ def interact_until_change(region, action, max_repeats, *, capture, controls, pro
                     "retry_step_seconds": profile.motion_limits.interaction_retry_step_seconds,
                     "action_sent": {"type": "interact", **sent}}
         if delta >= threshold:
-            _emit(recorder, "interact_until_change", attempt, SkillStatus.SUCCESS,
-                  "region_changed", evidence, before, after)
-            return _result(SkillStatus.SUCCESS, "SUCCESS_REGION_CHANGE", "region_changed", evidence, started)
+            _emit(recorder, "interact_until_change", attempt, SkillStatus.UNCONFIRMED,
+                  "region_changed_unverified", evidence, before, after)
+            return _result(SkillStatus.UNCONFIRMED, "REGION_CHANGE_UNCONFIRMED",
+                           "region_changed_unverified", evidence, started)
         _emit(recorder, "interact_until_change", attempt, SkillStatus.FAILED,
               "region_unchanged", evidence, before, after)
         if attempt < params.max_repeats:

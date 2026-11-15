@@ -134,7 +134,9 @@ class BasicSkillTests(unittest.TestCase):
                                       capture=FakeCapture([before, after]), controls=controls,
                                       profile=self.profile, camera_guard=self.guard,
                                       recorder=lambda row, old, new: rows.append(row))
-        self.assertEqual(result.result_code, "SUCCESS_REGION_CHANGE")
+        self.assertEqual(result.status, SkillStatus.UNCONFIRMED)
+        self.assertEqual(result.result_code, "REGION_CHANGE_UNCONFIRMED")
+        self.assertEqual(result.reason, "region_changed_unverified")
         self.assertEqual(controls.calls, [("mouse", "left", 2.5)])
         self.assertGreaterEqual(result.evidence["region_delta"], result.evidence["threshold"])
         self.assertEqual(rows[0]["skill"], "interact_until_change")

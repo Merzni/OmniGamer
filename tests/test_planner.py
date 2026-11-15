@@ -116,9 +116,11 @@ class GoalPlannerTests(unittest.TestCase):
             store = SkillOutcomeStore(Path(tmp) / "outcomes.db")
             store.record("a", "move_pulse", "move", "SUCCESS", 1, "r1")
             store.record("a", "move_pulse", "move", "FAILED", 2, "r2")
+            store.record("a", "move_pulse", "move", "SUCCESS_REGION_CHANGE", 3, "r4")
             store.record("b", "move_pulse", "move", "SUCCESS", 1, "r3")
             self.assertEqual(store.summary("a"), [{"skill": "move_pulse", "target": "move",
-                                                    "successes": 1, "attempts": 2, "success_rate": 0.5}])
+                                                    "successes": 1, "attempts": 3, "uncertain": 1,
+                                                    "success_rate": 0.333}])
             self.assertEqual(store.summary("b")[0]["attempts"], 1)
 
     def test_dry_run_logs_would_send_and_never_calls_executor(self):
@@ -147,6 +149,61 @@ class GoalPlannerTests(unittest.TestCase):
             result = executor.run("move")
             self.assertEqual(result["status"], "ABORT")
             self.assertEqual(len(planner_calls), 1)
+
+    def test_region_delta_is_unconfirmed_without_a_success_verifier(self):
+        with tempfile.TemporaryDirectory() as temp:
+            self.profile.actions = {"primary_hold": {"kind": "mouse", "value": "left"}}
+            self.profile.regions = {"hotbar": {"x1": .3, "y1": .9, "x2": .7, "y2": 1}}
+            store = SkillOutcomeStore(Path(temp) / "outcomes.db")
+            step = {"steps": [{"skill": "interact_until_change", "args": {
+                "region": "hotbar", "action": "primary_hold", "max_repeats": 1},
+                "expected_result": "item acquired", "success_check": "visible log count increased"}]}
+            planner = GoalPlanner(self.registry, lambda **_: step)
+            runner = GoalExecutor(planner, self.registry, store, profile=self.profile, game_id="sim",
+                execute_skill=lambda *_: SkillResult(status=SkillStatus.UNCONFIRMED,
+                    result_code="REGION_CHANGE_UNCONFIRMED", reason="region_changed_unverified"),
+                frame_provider=lambda: Image.new("RGB", (8, 8)), stop_check=lambda: None,
+                max_replans=0)
+            result = runner.run("collect a log")
+            self.assertEqual(result["status"], "FAILED")
+            summary = store.summary("sim")[0]
+            self.assertEqual(summary["successes"], 0)
+            self.assertEqual(summary["uncertain"], 1)
+
+    def test_success_check_can_confirm_or_reject_region_delta(self):
+        class Assessment:
+            def __init__(self, verdict, confidence=.95, evidence="visible item count increased"):
+                self.result, self.confidence, self.evidence = verdict, confidence, evidence
+                self.evidence_source = "visual_model"
+                self.usable = confidence >= .85 and len(evidence.strip()) >= 8
+
+        for verdict, confidence, evidence, expected in (
+                ("progress", .95, "visible item count increased", "SUCCESS"),
+                ("unknown", .95, "criterion remains unclear", "FAILED"),
+                ("blocked", .95, "the target remains unchanged", "FAILED"),
+                ("progress", .5, "Weak.", "FAILED")):
+            with self.subTest(verdict=verdict), tempfile.TemporaryDirectory() as temp:
+                self.profile.actions = {"primary_hold": {"kind": "mouse", "value": "left"}}
+                self.profile.regions = {"hotbar": {"x1": .3, "y1": .9, "x2": .7, "y2": 1}}
+                step = {"steps": [{"skill": "interact_until_change", "args": {
+                    "region": "hotbar", "action": "primary_hold", "max_repeats": 1},
+                    "expected_result": "item acquired", "success_check": "visible log count increased"}]}
+                planner = GoalPlanner(self.registry, lambda **_: step)
+                frames = [Image.new("RGB", (8, 8), (i, 0, 0)) for i in range(3)]
+                calls = []
+                def verify(plan_step, before, after, result, timeout_seconds):
+                    calls.append((plan_step.success_check, before.getpixel((0, 0)), after.getpixel((0, 0))))
+                    self.assertGreater(timeout_seconds, 0)
+                    return Assessment(verdict, confidence, evidence)
+                runner = GoalExecutor(planner, self.registry,
+                    SkillOutcomeStore(Path(temp) / "outcomes.db"), profile=self.profile, game_id="sim",
+                    execute_skill=lambda *_: SkillResult(status=SkillStatus.UNCONFIRMED,
+                        result_code="REGION_CHANGE_UNCONFIRMED", reason="region_changed_unverified"),
+                    frame_provider=lambda: frames.pop(0), stop_check=lambda: None,
+                    result_verifier=verify, max_replans=0)
+                result = runner.run("collect a log")
+                self.assertEqual(result["status"], expected)
+                self.assertEqual(calls[0][0], "visible log count increased")
 
     def test_blocked_approach_uses_bounded_local_recovery_before_replanning(self):
         with tempfile.TemporaryDirectory() as tmp:

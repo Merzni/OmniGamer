@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from omnigamer.planner import GoalExecutor, GoalPlanner, SkillOutcomeStore
+from omnigamer.perception import VisualAssessment
 from omnigamer.skills.registry import default_registry
 from omnigamer.supervision import CameraGuard
 from tests.sim.environment import (SimCapture, SimControls, SimDetector, SimRecorder,
@@ -48,9 +49,17 @@ class SyntheticGoalPathTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp:
             store = SkillOutcomeStore(Path(temp) / "outcomes.db")
+            def verify_visible_result(step, before, after, result, timeout_seconds):
+                region = profile.regions[step.args["region"]]
+                x = int((region.x1 + region.x2) * .5 * after.width)
+                y = int((region.y1 + region.y2) * .5 * after.height)
+                visible = after.getpixel((x, y)) == (245, 190, 35)
+                return VisualAssessment(result="progress" if visible else "unknown",
+                    confidence=.95 if visible else .2,
+                    evidence="Synthetic status marker appeared" if visible else "No marker evidence")
             runner = GoalExecutor(planner, registry, store, profile=profile, game_id=profile.game_id,
                                   execute_skill=execute, frame_provider=capture.grab_frame,
-                                  stop_check=lambda: None)
+                                  stop_check=lambda: None, result_verifier=verify_visible_result)
             result = runner.run("find the visible marker and activate it")
             self.assertEqual(result["status"], "SUCCESS")
             self.assertTrue(state.item)
