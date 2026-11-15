@@ -89,6 +89,10 @@ class CliGoalDryRunTests(unittest.TestCase):
                 encoding="utf-8").splitlines()]
             self.assertEqual([row["event"] for row in events],
                              ["plan", "would_send", "skill_result", "run_finish", "input_action_budget"])
+            self.assertEqual(events[0]["request_count"], 1)
+            self.assertEqual(len(events[0]["request_durations_seconds"]), 1)
+            self.assertGreaterEqual(events[0]["duration_seconds"],
+                                    events[0]["request_durations_seconds"][0])
             self.assertTrue(events[1]["detector"]["available"])
             self.assertEqual(events[1]["detector"]["box_count"], 1)
             self.assertEqual(events[-1]["actions_used"], 0)
