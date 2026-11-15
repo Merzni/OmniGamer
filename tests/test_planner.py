@@ -490,6 +490,8 @@ class GoalPlannerTests(unittest.TestCase):
             self.assertEqual(result["steps"], 4)
             approach_summary = next(item for item in store.summary("sim")
                                     if item["skill"] == "approach_target")
+            self.assertEqual((approach_summary["successes"], approach_summary["attempts"],
+                              approach_summary["success_rate"]), (1, 2, 0.5))
             self.assertIsNotNone(approach_summary["verified_example"])
 
     def test_lost_target_uses_local_search_and_reapproach(self):
@@ -517,6 +519,8 @@ class GoalPlannerTests(unittest.TestCase):
             self.assertEqual(len(planner_calls), 1)
             approach_summary = next(item for item in store.summary("sim")
                                     if item["skill"] == "approach_target")
+            self.assertEqual((approach_summary["successes"], approach_summary["attempts"],
+                              approach_summary["success_rate"]), (1, 2, 0.5))
             self.assertIsNotNone(approach_summary["verified_example"])
 
     def test_planner_failure_and_action_limit_fail_closed(self):

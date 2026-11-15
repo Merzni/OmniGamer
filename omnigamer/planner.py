@@ -458,9 +458,10 @@ class GoalExecutor:
             last_result = self.execute_skill(spec, params, available)
             last_result = last_result.model_dump() if hasattr(last_result, "model_dump") else last_result
             duration = last_result.get("duration_seconds", max(0.0, self.clock() - begin))
-            self.store.record(self.game_id, name, goal,
-                              last_result.get("result_code") or last_result.get("status", "FAILED"),
-                              duration, self.run_id, args=params)
+            if name != "approach_target":
+                self.store.record(self.game_id, name, goal,
+                                  last_result.get("result_code") or last_result.get("status", "FAILED"),
+                                  duration, self.run_id, args=params)
             if self.logger:
                 self.logger({"event": "local_recovery_skill", "recovery": "approach",
                              "skill": name, "args": params, "result": last_result})
@@ -603,6 +604,7 @@ class GoalExecutor:
                         recovered, recovery_steps = self._recover_blocked_approach(
                             goal, params["target_text"], started, steps_used)
                         steps_used += recovery_steps
+                        recovery_approach_ran = recovery_steps == 3
                         if recovered and recovered.get("status") == SkillStatus.SUCCESS.value:
                             if is_final_step:
                                 if self.result_verifier:
@@ -634,7 +636,21 @@ class GoalExecutor:
                                 result = recovered
                                 status = result.get("status", "FAILED")
                             else:
+                                if recovery_approach_ran:
+                                    self.store.record(
+                                        self.game_id, step.skill, goal,
+                                        recovered.get("result_code") or recovered.get("status", "FAILED"),
+                                        recovered.get("duration_seconds", 0.0), self.run_id,
+                                        args=params, expected_result=step.expected_result,
+                                        success_check=step.success_check)
                                 continue
+                        elif recovered and recovery_approach_ran:
+                            self.store.record(
+                                self.game_id, step.skill, goal,
+                                recovered.get("result_code") or recovered.get("status", "FAILED"),
+                                recovered.get("duration_seconds", 0.0), self.run_id,
+                                args=params, expected_result=step.expected_result,
+                                success_check=step.success_check)
                         if recovered:
                             result = recovered
                     failure = f"{step.skill}: {status}: {result.get('reason', '')}; expected={step.expected_result}; check={step.success_check}"
