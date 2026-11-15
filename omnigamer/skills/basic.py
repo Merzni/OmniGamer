@@ -86,10 +86,10 @@ def region_delta(before, after, region, noise_floor=4):
     return float(np.percentile(noise_suppressed, 97) / (255 - noise_floor))
 
 
-def _queries_for(profile, target):
+def queries_for_target(profile, target):
     queries = [target]
     normalized = target.casefold()
-    for label, synonyms in profile.detector_queries.items():
+    for label, synonyms in (getattr(profile, "detector_queries", {}) or {}).items():
         if label.replace("_", " ").casefold() in normalized or any(
                 str(value).casefold() == normalized for value in synonyms):
             for value in synonyms:
@@ -194,7 +194,7 @@ def search_target(target_text, sweep, *, capture, detector, controls, camera_gua
                   profile, stop_check=None, recorder=None, vertical=False):
     params = SearchTargetParams(target_text=target_text, sweep=sweep, vertical=vertical)
     started = time.monotonic()
-    queries = _queries_for(profile, params.target_text)
+    queries = queries_for_target(profile, params.target_text)
     per_turn = profile.motion_limits.max_turn_counts
     sweep_turn_limit = max(1, profile.motion_limits.max_sweep_counts // max(1, per_turn))
     max_turns = min(params.sweep, 12, profile.motion_limits.max_actions, sweep_turn_limit)
@@ -342,7 +342,7 @@ def wait_for_condition(*, capture, profile, timeout, query=None, region=None,
         if params.query:
             if detector is None:
                 return _result(SkillStatus.FAILED, "FAILED", "detector_unavailable", {}, started)
-            boxes = _valid_detection(detector.detect(frame, _queries_for(profile, params.query)), profile)
+            boxes = _valid_detection(detector.detect(frame, queries_for_target(profile, params.query)), profile)
             visible = bool(boxes)
             last_evidence["boxes"] = boxes
         if params.region:

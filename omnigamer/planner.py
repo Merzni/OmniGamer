@@ -471,10 +471,21 @@ class GoalExecutor:
                         query = params.get("target_text") or params.get("query")
                         if query:
                             try:
-                                found = self.detector.detect(self.frame_provider(), [query])
+                                from .skills.basic import _valid_detection, queries_for_target
+                                queries = (queries_for_target(self.profile, query)
+                                           if self.profile else [query])
+                                score_min = (self.profile.thresholds.get("detector_score_min")
+                                             if self.profile else None)
+                                found = self.detector.detect(self.frame_provider(), queries,
+                                                             score_min=score_min, max_boxes=10)
+                                raw_boxes = found.get("boxes", []) if found else []
+                                valid_boxes = (_valid_detection(found, self.profile)
+                                               if found and self.profile else raw_boxes)
                                 resolved["detector"] = {"query": query,
+                                    "queries": queries,
                                     "available": found is not None,
-                                    "box_count": len(found.get("boxes", [])) if found else 0}
+                                    "box_count": len(raw_boxes),
+                                    "candidate_box_count": len(valid_boxes)}
                             except Exception as exc:
                                 resolved["detector"] = {"query": query, "available": False,
                                     "error": type(exc).__name__}

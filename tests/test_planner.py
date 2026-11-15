@@ -207,6 +207,36 @@ class GoalPlannerTests(unittest.TestCase):
             self.assertEqual(calls, [])
             self.assertEqual(logs[1]["event"], "would_send")
 
+    def test_dry_run_detector_uses_profile_synonyms(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.profile.detector_queries = {"tree_trunk": ["a tree trunk", "a tree"]}
+            self.profile.thresholds["detector_score_min"] = 0.15
+            seen = []
+
+            class Detector:
+                def detect(self, _image, queries, **kwargs):
+                    seen.append((queries, kwargs))
+                    boxes = ([{"query": "a tree", "score": 0.259, "x1": 0.302,
+                               "y1": 0.0, "x2": 0.746, "y2": 0.956}]
+                             if "a tree" in queries else [])
+                    return {"boxes": boxes}
+
+            plan = {"steps": [{"skill": "approach_target", "args": {"target_text": "a tree trunk"},
+                                "expected_result": "near", "success_check": "target centered"}]}
+            planner = GoalPlanner(self.registry, lambda **_: plan)
+            logs = []
+            runner = GoalExecutor(planner, self.registry, SkillOutcomeStore(Path(tmp) / "outcomes.db"),
+                profile=self.profile, game_id="sim", execute_skill=lambda *_: self.fail("dry run executed"),
+                frame_provider=lambda: object(), stop_check=lambda: None, dry_run=True,
+                detector=Detector(), logger=logs.append)
+            result = runner.run("approach a tree")
+            self.assertEqual(result["status"], "DRY_RUN")
+            self.assertEqual(seen[0][0], ["a tree trunk", "a tree"])
+            self.assertEqual(seen[0][1], {"score_min": 0.15, "max_boxes": 10})
+            detection = logs[1]["detector"]
+            self.assertEqual(detection["box_count"], 1)
+            self.assertEqual(detection["candidate_box_count"], 1)
+
     def test_failed_skill_replans_then_abort_stops(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = SkillOutcomeStore(Path(tmp) / "outcomes.db")

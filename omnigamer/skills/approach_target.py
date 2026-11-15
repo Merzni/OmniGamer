@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..config import config
+from .basic import queries_for_target
 
 logger = logging.getLogger(__name__)
 
@@ -213,13 +214,7 @@ class ApproachTargetSkill:
         temporary.replace(self.calibration_path)
 
     def _detect(self, frame):
-        queries = [self.target_text]
-        target = self.target_text.casefold()
-        for label, synonyms in getattr(self.profile, "detector_queries", {}).items():
-            if label.replace("_", " ").casefold() in target or any(
-                    str(query).casefold() == target for query in synonyms):
-                existing = {item.casefold() for item in queries}
-                queries.extend(str(query) for query in synonyms if str(query).casefold() not in existing)
+        queries = queries_for_target(self.profile, self.target_text)
         response = self.detector.detect(
             frame, queries, score_min=self.settings.score_min,
             max_boxes=self.settings.max_boxes,
