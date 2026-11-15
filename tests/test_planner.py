@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 from PIL import Image
+from omnigamer.memory import GameMemory
 from omnigamer.planner import (BudgetControls, GoalExecutor, GoalPlan, GoalPlanner,
                                InputActionBudget, InputActionLimitExceeded,
                                PlanningError, SkillOutcomeStore)
@@ -223,6 +224,33 @@ class GoalPlannerTests(unittest.TestCase):
             self.assertEqual(store.summary("sim")[0]["verified_example"]["args"],
                              {"target_text": "birch trunk"})
 
+    def test_verified_examples_are_filtered_by_matching_screen_state(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = SkillOutcomeStore(Path(temp) / "outcomes.db")
+            left_to_right = Image.new("RGB", (16, 16), (0, 0, 0))
+            right_to_left = Image.new("RGB", (16, 16), (0, 0, 0))
+            for x in range(8, 16):
+                for y in range(16):
+                    left_to_right.putpixel((x, y), (255, 255, 255))
+            for x in range(8):
+                for y in range(16):
+                    right_to_left.putpixel((x, y), (255, 255, 255))
+            state_a = GameMemory.compute_state_hash(left_to_right)
+            state_b = GameMemory.compute_state_hash(right_to_left)
+            self.assertGreater(GameMemory._hash_distance(state_a, state_b), 4)
+            store.record("sim", "move_pulse", "move", "SUCCESS_VERIFIED", 1, "a",
+                         args={"direction": "forward", "seconds": 0.5}, state_hash=state_a)
+            store.record("sim", "move_pulse", "move", "SUCCESS_VERIFIED", 1, "b",
+                         args={"direction": "left", "seconds": 0.5}, state_hash=state_b)
+            self.assertEqual(store.summary("sim", state_hash=state_a)[0]["verified_example"]["args"],
+                             {"direction": "forward", "seconds": 0.5})
+            self.assertIsNone(store.summary("sim", state_hash="ffffffffffffffff")[0]["verified_example"])
+
+            nearby_state_a = f"{int(state_a, 16) ^ 1:016x}"
+            store.record("sim", "move_pulse", "move", "FAILED", 1, "a-failed",
+                         args={"direction": "forward", "seconds": 0.5}, state_hash=nearby_state_a)
+            self.assertIsNone(store.summary("sim", state_hash=state_a)[0]["verified_example"])
+
     def test_skill_outcome_store_additively_migrates_legacy_schema(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "legacy.db"
@@ -234,7 +262,7 @@ class GoalPlannerTests(unittest.TestCase):
             store = SkillOutcomeStore(path)
             with closing(sqlite3.connect(path)) as conn:
                 columns = {row[1] for row in conn.execute("PRAGMA table_info(skill_outcomes)")}
-            self.assertTrue({"args_json", "expected_result", "success_check"}.issubset(columns))
+            self.assertTrue({"args_json", "expected_result", "success_check", "state_hash"}.issubset(columns))
             store.record("sim", "turn", "look around", "SUCCESS_VERIFIED", 0.2, "r1",
                          args={"direction": "left", "amount": 20},
                          expected_result="new area visible", success_check="landmark changed")
@@ -260,7 +288,8 @@ class GoalPlannerTests(unittest.TestCase):
 
             store.record("sim", "move_pulse", "move", "SUCCESS_VERIFIED", 0.4, "new",
                          args={"direction": "forward", "seconds": 0.4},
-                         expected_result="nearer", success_check="target is closer")
+                         expected_result="nearer", success_check="target is closer",
+                         state_hash="0123456789abcdef")
             reopened = SkillOutcomeStore(path).summary("sim")[0]
             self.assertEqual((reopened["successes"], reopened["attempts"]), (1, 2))
             self.assertEqual(reopened["verified_example"]["args"],
@@ -297,14 +326,24 @@ class GoalPlannerTests(unittest.TestCase):
     def test_goal_telemetry_counts_only_exact_verified_example_reuse_for_same_goal(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = SkillOutcomeStore(Path(tmp) / "outcomes.db")
+            frame_a = Image.new("RGB", (16, 16), (0, 0, 0))
+            frame_b = Image.new("RGB", (16, 16), (0, 0, 0))
+            for x in range(8, 16):
+                for y in range(16):
+                    frame_a.putpixel((x, y), (255, 255, 255))
+            for x in range(8):
+                for y in range(16):
+                    frame_b.putpixel((x, y), (255, 255, 255))
+            state_hash = GameMemory.compute_state_hash(frame_a)
             store.record("sim", "move_pulse", "move", "SUCCESS_VERIFIED", 0.5, "prior",
                          args={"direction": "forward", "seconds": 0.5},
-                         expected_result="closer", success_check="target moved closer")
+                         expected_result="closer", success_check="target moved closer",
+                         state_hash=state_hash)
             planner = GoalPlanner(self.registry, lambda **_: plan_for())
             logs = []
             runner = GoalExecutor(planner, self.registry, store, profile=self.profile, game_id="sim",
                 execute_skill=lambda *_: self.fail("dry run executed"),
-                frame_provider=lambda: object(), stop_check=lambda: None, dry_run=True,
+                frame_provider=lambda: frame_a, stop_check=lambda: None, dry_run=True,
                 logger=logs.append)
 
             result = runner.run("move")
@@ -313,6 +352,17 @@ class GoalPlannerTests(unittest.TestCase):
             self.assertEqual(plan_event["verified_example_count"], 1)
             self.assertEqual(plan_event["memory_reuse_count"], 1)
             self.assertEqual(result["memory_reuse_count"], 1)
+
+            logs.clear()
+            other_state = GoalExecutor(planner, self.registry, store, profile=self.profile, game_id="sim",
+                execute_skill=lambda *_: self.fail("dry run executed"),
+                frame_provider=lambda: frame_b, stop_check=lambda: None, dry_run=True,
+                logger=logs.append)
+            other_state_result = other_state.run("move")
+            other_state_plan = next(event for event in logs if event["event"] == "plan")
+            self.assertEqual(other_state_plan["verified_example_count"], 0)
+            self.assertEqual(other_state_plan["memory_reuse_count"], 0)
+            self.assertEqual(other_state_result["memory_reuse_count"], 0)
 
             logs.clear()
             other_goal = GoalExecutor(planner, self.registry, store, profile=self.profile, game_id="sim",
@@ -512,9 +562,10 @@ class GoalPlannerTests(unittest.TestCase):
                 self.assertNotEqual(observed_before.getpixel((2, 2)), observed_after.getpixel((2, 2)))
                 return Assessment()
 
+            store = SkillOutcomeStore(Path(temp) / "outcomes.db")
             runner = GoalExecutor(
                 GoalPlanner(self.registry, lambda **_: step), self.registry,
-                SkillOutcomeStore(Path(temp) / "outcomes.db"), profile=self.profile, game_id="sim",
+                store, profile=self.profile, game_id="sim",
                 execute_skill=lambda *_: SkillResult(status=SkillStatus.UNCONFIRMED,
                     result_code="INTERACTION_OUTCOME_UNCONFIRMED",
                     reason="interaction_without_region_change"),
@@ -523,8 +574,10 @@ class GoalPlannerTests(unittest.TestCase):
             result = runner.run("remove target")
             self.assertEqual(result["status"], "SUCCESS")
             self.assertEqual(calls, [("the target block disappeared", "INTERACTION_OUTCOME_UNCONFIRMED")])
-            recorded = runner.store.summary("sim")[0]
+            recorded = runner.store.summary("sim", state_hash=GameMemory.compute_state_hash(
+                planning_frame))[0]
             self.assertEqual(recorded["successes"], 1)
+            self.assertIsNotNone(recorded["verified_example"])
 
     def test_blocked_approach_uses_bounded_local_recovery_before_replanning(self):
         with tempfile.TemporaryDirectory() as tmp:

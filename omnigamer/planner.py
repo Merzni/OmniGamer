@@ -12,6 +12,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .config import config
+from .memory import GameMemory
 from .skills.contracts import SkillStatus
 
 OUTCOME_SUCCESS_CODES = frozenset({
@@ -144,9 +145,11 @@ class SkillOutcomeStore:
                          "ON skill_outcomes(game_id,skill,target)")
             columns = {row[1] for row in conn.execute("PRAGMA table_info(skill_outcomes)")}
             for name, sql_type in (("args_json", "TEXT"), ("expected_result", "TEXT"),
-                                   ("success_check", "TEXT")):
+                                   ("success_check", "TEXT"), ("state_hash", "TEXT")):
                 if name not in columns:
                     conn.execute(f"ALTER TABLE skill_outcomes ADD COLUMN {name} {sql_type}")
+            conn.execute("CREATE INDEX IF NOT EXISTS ix_skill_outcomes_state "
+                         "ON skill_outcomes(game_id,state_hash)")
             conn.commit()
 
     @contextmanager
@@ -158,22 +161,24 @@ class SkillOutcomeStore:
                 yield conn
 
     def record(self, game_id, skill, target, result, duration, run_id, *, args=None,
-               expected_result="", success_check=""):
+               expected_result="", success_check="", state_hash=None):
         args_json = json.dumps(args, ensure_ascii=False, sort_keys=True) if args is not None else None
         with self._connection() as conn:
             conn.execute("INSERT INTO skill_outcomes(game_id,skill,target,result,duration,ts,run_id,"
-                         "args_json,expected_result,success_check) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                         "args_json,expected_result,success_check,state_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                          (game_id, skill, target, result, max(0.0, float(duration)), time.time(),
-                          run_id, args_json, str(expected_result or ""), str(success_check or "")))
+                          run_id, args_json, str(expected_result or ""), str(success_check or ""),
+                          state_hash))
             conn.commit()
 
-    def summary(self, game_id, limit=200, max_groups=20):
+    def summary(self, game_id, limit=200, max_groups=20, *, state_hash=None):
         with self._connection() as conn:
-            rows = conn.execute("SELECT skill,target,result,args_json,expected_result,success_check "
+            rows = conn.execute("SELECT skill,target,result,args_json,expected_result,success_check,state_hash "
                                 "FROM skill_outcomes WHERE game_id=? "
                                 "ORDER BY id DESC LIMIT ?", (game_id, limit)).fetchall()
         grouped = {}
-        for skill, target, result, args_json, expected_result, success_check in rows:
+        state_examples = {}
+        for skill, target, result, args_json, expected_result, success_check, example_state_hash in rows:
             item = grouped.setdefault((skill, target), [0, 0, 0, None, False])
             item[1] += 1
             is_success = result in OUTCOME_SUCCESS_CODES
@@ -182,7 +187,7 @@ class SkillOutcomeStore:
                                   "REGION_CHANGE_UNCONFIRMED"}
             # Rows are newest first. A later failure, uncertain attempt, or generic
             # command success invalidates the old recipe until a fresh verified result.
-            if not item[4]:
+            if state_hash is None and not item[4]:
                 item[4] = True
                 if result not in OUTCOME_SUCCESS_CODES or not args_json:
                     continue
@@ -193,9 +198,25 @@ class SkillOutcomeStore:
                 if isinstance(args, dict):
                     item[3] = {"args": args, "expected_result": expected_result or "",
                                "success_check": success_check or ""}
+            elif (state_hash is not None and example_state_hash
+                  and GameMemory._hash_distance(state_hash, example_state_hash) <= 4):
+                state_item = state_examples.setdefault((skill, target), [False, None])
+                if state_item[0]:
+                    continue
+                state_item[0] = True
+                if result not in OUTCOME_SUCCESS_CODES or not args_json:
+                    continue
+                try:
+                    args = json.loads(args_json)
+                except (TypeError, ValueError):
+                    args = None
+                if isinstance(args, dict):
+                    state_item[1] = {"args": args, "expected_result": expected_result or "",
+                                     "success_check": success_check or ""}
         summaries = [{"skill": skill, "target": target, "successes": values[0], "attempts": values[1],
                       "uncertain": values[2], "success_rate": round(values[0] / values[1], 3),
-                      "verified_example": values[3]}
+                      "verified_example": (state_examples.get((skill, target), [False, None])[1]
+                                           if state_hash is not None else values[3])}
                      for (skill, target), values in sorted(grouped.items())]
         return summaries[:max(1, int(max_groups))]
 
@@ -432,7 +453,7 @@ class GoalExecutor:
             self.logger({"event": "run_finish", **result})
         return result
 
-    def _recover_blocked_approach(self, goal, target_text, started, steps_used):
+    def _recover_blocked_approach(self, goal, target_text, started, steps_used, state_hash=None):
         """Try one bounded camera sweep and a fresh approach before a slow VLM replan."""
         if self.dry_run:
             return None, 0, None
@@ -468,7 +489,7 @@ class GoalExecutor:
             if name != "approach_target":
                 self.store.record(self.game_id, name, goal,
                                   last_result.get("result_code") or last_result.get("status", "FAILED"),
-                                  duration, self.run_id, args=params)
+                                  duration, self.run_id, args=params, state_hash=state_hash)
             if self.logger:
                 self.logger({"event": "local_recovery_skill", "recovery": "approach",
                              "skill": name, "args": params, "result": last_result})
@@ -490,7 +511,9 @@ class GoalExecutor:
             if plan_budget <= 0:
                 return self._finish({"status": "FAILED", "reason": "max_run_seconds", "steps": steps_used})
             frame = self.frame_provider()
-            outcome_summary = self.store.summary(self.game_id)
+            state_hash = (GameMemory.compute_state_hash(frame)
+                          if hasattr(frame, "convert") else None)
+            outcome_summary = self.store.summary(self.game_id, state_hash=state_hash)
             try:
                 plan = self.planner.plan(frame=frame, goal=goal, profile=self.profile,
                                          outcome_summary=outcome_summary, failure=failure,
@@ -592,7 +615,7 @@ class GoalExecutor:
                     self.store.record(self.game_id, step.skill, goal,
                                       result.get("result_code") or status, duration, self.run_id,
                                       args=params, expected_result=step.expected_result,
-                                      success_check=step.success_check)
+                                      success_check=step.success_check, state_hash=state_hash)
                 if self.logger:
                     self.logger({"event": "skill_result", "skill": step.skill,
                                  "args": step.args, "result": result})
@@ -610,7 +633,7 @@ class GoalExecutor:
                             and result.get("reason") in {
                                 "blocked_after_side_step", "target_not_reacquired"}):
                         recovered, recovery_steps, recovery_skill = self._recover_blocked_approach(
-                            goal, params["target_text"], started, steps_used)
+                            goal, params["target_text"], started, steps_used, state_hash=state_hash)
                         steps_used += recovery_steps
                         recovery_approach_ran = recovery_skill == "approach_target"
                         if recovered and recovered.get("status") == SkillStatus.SUCCESS.value:
@@ -631,7 +654,7 @@ class GoalExecutor:
                                         recovered.get("result_code") or recovered.get("status", "FAILED"),
                                         recovered.get("duration_seconds", 0.0), self.run_id,
                                         args=params, expected_result=step.expected_result,
-                                        success_check=step.success_check)
+                                        success_check=step.success_check, state_hash=state_hash)
                                 if self.logger:
                                     self.logger({"event": "goal_postcondition", "skill": step.skill,
                                                  "result": recovered})
@@ -650,7 +673,7 @@ class GoalExecutor:
                                         recovered.get("result_code") or recovered.get("status", "FAILED"),
                                         recovered.get("duration_seconds", 0.0), self.run_id,
                                         args=params, expected_result=step.expected_result,
-                                        success_check=step.success_check)
+                                        success_check=step.success_check, state_hash=state_hash)
                                 continue
                         elif recovered and recovery_approach_ran:
                             self.store.record(
@@ -658,7 +681,7 @@ class GoalExecutor:
                                 recovered.get("result_code") or recovered.get("status", "FAILED"),
                                 recovered.get("duration_seconds", 0.0), self.run_id,
                                 args=params, expected_result=step.expected_result,
-                                success_check=step.success_check)
+                                success_check=step.success_check, state_hash=state_hash)
                         if recovered:
                             result = recovered
                     failure = f"{step.skill}: {status}: {result.get('reason', '')}; expected={step.expected_result}; check={step.success_check}"
