@@ -16,7 +16,8 @@ def checked(**after):
 class CameraGuardTests(unittest.TestCase):
     def test_digging_down_is_replaced_by_upward_reorientation(self):
         action, reason = CameraGuard().filter(dict(action_type="mine"),
-            FrameFacts(scene="gameplay",pitch="down"), grounded_confident=True)
+            FrameFacts(scene="gameplay",pitch="down"), grounded_confident=True,
+            require_grounded_level_view=True)
         self.assertEqual((action["action_type"],action["y"]), ("look",-50))
         self.assertTrue(reason)
 
@@ -24,26 +25,36 @@ class CameraGuardTests(unittest.TestCase):
         for pitch, footing in (("unknown",True),("level",False)):
             with self.subTest(pitch=pitch):
                 action, _ = CameraGuard().filter(dict(action_type="mine"),
-                    FrameFacts(scene="gameplay",pitch=pitch), grounded_confident=footing)
+                    FrameFacts(scene="gameplay",pitch=pitch), grounded_confident=footing,
+                    require_grounded_level_view=True)
                 self.assertEqual(action["action_type"], "wait")
 
     def test_fresh_level_view_and_support_allow_forward_mining(self):
         action, _ = CameraGuard().filter(dict(action_type="mine"),
-            FrameFacts(scene="gameplay",pitch="level"), grounded_confident=True)
+            FrameFacts(scene="gameplay",pitch="level"), grounded_confident=True,
+            require_grounded_level_view=True)
         self.assertEqual(action["action_type"], "mine")
+
+    def test_mining_ground_rules_are_opt_in_for_profiles(self):
+        action, reason = CameraGuard().filter(dict(action_type="mine"),
+            FrameFacts(scene="gameplay", pitch="down"), grounded_confident=False)
+        self.assertEqual(action["action_type"], "mine")
+        self.assertEqual(reason, "")
 
     def test_profile_can_require_visible_target_under_crosshair(self):
         action, reason = CameraGuard().filter(dict(action_type="mine"),
             FrameFacts(scene="gameplay", pitch="level", safe_footing=True,
                        target_at_crosshair=None),
-            grounded_confident=True, require_target_at_crosshair=True)
+            grounded_confident=True, require_grounded_level_view=True,
+            require_target_at_crosshair=True)
         self.assertEqual(action["action_type"], "wait")
         self.assertIn("под прицелом", reason)
 
         action, _ = CameraGuard().filter(dict(action_type="mine"),
             FrameFacts(scene="gameplay", pitch="level", safe_footing=True,
                        target_at_crosshair=True),
-            grounded_confident=True, require_target_at_crosshair=True)
+            grounded_confident=True, require_grounded_level_view=True,
+            require_target_at_crosshair=True)
         self.assertEqual(action["action_type"], "mine")
 
     def test_extreme_vertical_command_is_bounded(self):

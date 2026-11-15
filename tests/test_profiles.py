@@ -20,6 +20,13 @@ class GameProfileTests(unittest.TestCase):
 
     def test_crosshair_target_precondition_is_explicitly_profiled(self):
         self.assertFalse(GameProfile(game_id="generic").mine_requires_target_at_crosshair)
+        self.assertFalse(GameProfile(game_id="generic").mine_requires_grounded_level_view)
+        self.assertTrue(GameProfile(game_id="legacy-first-person", camera_type="first_person")
+                        .mine_requires_grounded_level_view)
+        self.assertFalse(GameProfile(game_id="flat-game", camera_type="first_person",
+                                     mine_requires_grounded_level_view=False)
+                         .mine_requires_grounded_level_view)
+        self.assertTrue(load_profile("minecraft").mine_requires_grounded_level_view)
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "mining.json"
             path.write_text(json.dumps({"game_id": "mining-game",

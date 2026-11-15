@@ -18,7 +18,7 @@ class CameraGuard:
         self.vertical_offset = 0
 
     def filter(self, action, facts=None, grounded_confident=False,
-               require_target_at_crosshair=False):
+               require_grounded_level_view=False, require_target_at_crosshair=False):
         result = dict(action)
         pitch = facts.pitch if facts else "unknown"
         scene = facts.scene if facts else result.get("scene_type", "unknown")
@@ -26,12 +26,15 @@ class CameraGuard:
             pitch = result.get("camera_pitch", "unknown")
         kind = result["action_type"]
         reason = ""
-        if scene == "gameplay" and pitch in {"up", "down"} and kind in {"walk", "jump", "mine"}:
+        pitch_sensitive_move = kind in {"walk", "jump"} or (
+            kind == "mine" and require_grounded_level_view)
+        if scene == "gameplay" and pitch in {"up", "down"} and pitch_sensitive_move:
             direction = "down" if pitch == "up" else "up"
             result.update(action_type="look", look_direction=direction, look_amount="medium",
                           x=None, y=None, key=None)
             reason = "Сначала вернуть взгляд к горизонту; движение/копание при экстремальном наклоне отменено."
-        elif kind == "mine" and (pitch != "level" or not grounded_confident):
+        elif (kind == "mine" and require_grounded_level_view
+              and (pitch != "level" or not grounded_confident)):
             result.update(action_type="wait", duration=.5, key=None, x=None, y=None)
             reason = "Копание отменено: направление взгляда и безопасная опора не подтверждены."
         elif (kind == "mine" and require_target_at_crosshair

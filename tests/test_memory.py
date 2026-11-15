@@ -205,11 +205,13 @@ class AgentMemoryTests(unittest.TestCase):
         self.addCleanup(setattr,agent_module.config,"desktop_bot_pointer",agent_module.config.desktop_bot_pointer)
         agent_module.config.desktop_bot_pointer=False
 
-    def create(self, game_id="survival", mine_requires_target_at_crosshair=False):
-        profile = GameProfile(game_id=game_id, camera_type="first_person",
+    def create(self, game_id="survival", mine_requires_target_at_crosshair=False,
+               mine_requires_grounded_level_view=True, camera_type="first_person"):
+        profile = GameProfile(game_id=game_id, camera_type=camera_type,
             actions={"primary_hold": InputAction(kind="mouse", value="left", duration=3),
                      "interact": InputAction(kind="mouse", value="right", duration=0.15),
                      "jump": InputAction(kind="key", value="space", duration=0.75)},
+            mine_requires_grounded_level_view=mine_requires_grounded_level_view,
             mine_requires_target_at_crosshair=mine_requires_target_at_crosshair)
         return self.module.OmniAgent(db_path=self.path, hwnd=123, game_id=game_id,input_backend="native",
                                      emergency_hotkey_enabled=False, telemetry_enabled=False,
@@ -496,6 +498,15 @@ class AgentMemoryTests(unittest.TestCase):
         agent=self.create();agent.step()
         self.HumanInputController.return_value.hold_mouse.assert_called_once_with(button="left",duration=3)
         self.assertEqual(agent.brain.assess.call_count,2)
+
+    def test_generic_profile_skips_mining_specific_preflight(self):
+        self.VisionBrain.return_value.decide.return_value = BrainDecision(
+            action_type="mine", duration=0.5)
+        agent = self.create(game_id="platformer", mine_requires_grounded_level_view=False,
+                            camera_type="none")
+        agent.step()
+        self.VisionBrain.return_value.assess.assert_called_once()
+        self.HumanInputController.return_value.hold_mouse.assert_called_once()
 
     def test_mining_profile_requires_fresh_crosshair_target_evidence(self):
         from omnigamer.perception import FrameFacts, VisualAssessment

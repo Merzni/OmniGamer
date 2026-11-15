@@ -77,10 +77,19 @@ class GameProfile(BaseModel):
     motion_limits: MotionLimits = Field(default_factory=MotionLimits)
     detector_queries: Dict[str, list[str]] = Field(default_factory=dict)
     ui_adapters: list[Literal["world_selection"]] = Field(default_factory=list)
+    mine_requires_grounded_level_view: bool | None = None
     mine_requires_target_at_crosshair: bool = False
     thresholds: Dict[str, float] = Field(default_factory=dict)
     prompt_addendum: str = Field(default="", max_length=4000)
     calibration: Dict[str, float | bool] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def default_mining_view_guard(self):
+        # Preserve the old 3D mining guard for legacy first-person profiles,
+        # while leaving non-camera profiles free of that assumption.
+        if self.mine_requires_grounded_level_view is None:
+            self.mine_requires_grounded_level_view = self.camera_type == "first_person"
+        return self
 
     @field_validator("game_id")
     @classmethod

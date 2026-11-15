@@ -543,8 +543,8 @@ class OmniAgent:
             self.last_action_source="menu_memory"
             self.last_menu_memory={"mode":"replay",**recalled,
                                    "message":"Знакомое меню: повторяю проверенный шаг"}
-        # Mining requires a fresh, separate visual safety check. Actor narration
-        # and the mere fact that the image changed cannot authorize it.
+        # Interaction facts are refreshed only when the active profile requires
+        # them; this avoids a second model request for games with different rules.
         facts = None
         facts_confident = False
         facts_source = ""
@@ -554,7 +554,12 @@ class OmniAgent:
             facts = self._verified_facts
             facts_confident = True
             facts_source = "cached_verified"
-        if decision.action_type == "mine" and facts is None:
+        require_grounded_level_view = bool(getattr(
+            self.profile, "mine_requires_grounded_level_view", False))
+        require_target_at_crosshair = bool(getattr(
+            self.profile, "mine_requires_target_at_crosshair", False))
+        if (decision.action_type == "mine" and facts is None
+                and (require_grounded_level_view or require_target_at_crosshair)):
             check_started = time.perf_counter()
             raw_responses = getattr(self.brain, "telemetry_raw_json_responses", [])
             raw_start = len(raw_responses) if isinstance(raw_responses, list) else 0
@@ -589,8 +594,8 @@ class OmniAgent:
         filtered, guard_reason = self.camera_guard.filter(
             decision.model_dump(), facts=facts,
             grounded_confident=grounded_confident,
-            require_target_at_crosshair=bool(getattr(
-                self.profile, "mine_requires_target_at_crosshair", False)),
+            require_grounded_level_view=require_grounded_level_view,
+            require_target_at_crosshair=require_target_at_crosshair,
         )
         self.last_guard_reason = guard_reason or profile_camera_reason
         if self.last_guard_reason:
@@ -623,12 +628,11 @@ class OmniAgent:
                 self._telemetry_trace.data["decision"]["refusal_reason"] = str(refusal_reason)[:240]
             if mine_proposed:
                 failed_conditions = []
-                if facts.pitch != "level":
+                if require_grounded_level_view and facts.pitch != "level":
                     failed_conditions.append("pitch_not_level")
-                if not grounded_confident:
+                if require_grounded_level_view and not grounded_confident:
                     failed_conditions.append("grounded_confident_false")
-                if (getattr(self.profile, "mine_requires_target_at_crosshair", False)
-                        and facts.target_at_crosshair is not True):
+                if require_target_at_crosshair and facts.target_at_crosshair is not True:
                     failed_conditions.append("target_at_crosshair_unconfirmed")
                 self._telemetry_trace.data["decision"]["guard"] = {
                     "facts": {
