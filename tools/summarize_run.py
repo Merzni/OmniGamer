@@ -1,0 +1,236 @@
+"""Summarize one OmniGamer telemetry run using only the standard library."""
+import argparse
+import json
+import math
+import statistics
+import sys
+from collections import Counter, defaultdict
+from datetime import datetime
+from pathlib import Path
+
+
+STAGES = (
+    ("capture", "Захват кадра"),
+    ("memory_lookup", "Поиск памяти"),
+    ("vlm_decide", "Решение VLM"),
+    ("grounding", "Локализация цели"),
+    ("input_send", "Выполнение действия"),
+    ("post_wait", "Пауза после действия"),
+    ("preflight_eval", "Предварительная проверка"),
+    ("result_eval", "Оценка результата"),
+    ("memory_write", "Запись памяти"),
+    ("total", "Весь шаг"),
+)
+STATUSES = ("success", "no_effect", "uncertain", "refusal", "camera_motion")
+
+
+def _read_jsonl(path):
+    if not path.exists():
+        return []
+    rows = []
+    with path.open(encoding="utf-8") as stream:
+        for line_number, line in enumerate(stream, 1):
+            if line.strip():
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"Некорректный JSON в {path.name}:{line_number}: {exc}") from exc
+    return rows
+
+
+def _parse_time(value):
+    if not value:
+        return None
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _number(value):
+    return isinstance(value, (int, float)) and math.isfinite(value)
+
+
+def _p95(values):
+    ordered = sorted(values)
+    if not ordered:
+        return None
+    rank = max(1, math.ceil(0.95 * len(ordered)))
+    return ordered[rank - 1]
+
+
+def _ms(value):
+    return "—" if value is None else f"{value:.2f} мс"
+
+
+def _mb(value):
+    return "—" if value is None else f"{value:.2f} МБ"
+
+
+def summarize(run_dir):
+    run_dir = Path(run_dir)
+    if not run_dir.is_dir():
+        raise FileNotFoundError(f"Каталог прогона не найден: {run_dir}")
+    meta_path = run_dir / "run_meta.json"
+    if not meta_path.exists():
+        raise FileNotFoundError(f"Нет run_meta.json: {run_dir}")
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    steps = _read_jsonl(run_dir / "steps.jsonl")
+    resources = _read_jsonl(run_dir / "resources.jsonl")
+    started = _parse_time(meta.get("started_at"))
+    ended = _parse_time(meta.get("ended_at"))
+    if started and ended:
+        duration_s = max(0.0, (ended - started).total_seconds())
+    else:
+        duration_s = 0.0
+    rate = len(steps) * 60 / duration_s if duration_s > 0 else None
+
+    stage_values = {}
+    total_values = [step.get("timings_ms", {}).get("total") for step in steps]
+    total_sum = sum(value for value in total_values if _number(value))
+    for key, _ in STAGES:
+        values = [step.get("timings_ms", {}).get(key) for step in steps]
+        values = [value for value in values if _number(value)]
+        stage_values[key] = values
+
+    by_action = defaultdict(Counter)
+    failure_reasons = Counter()
+    errors = Counter()
+    for step in steps:
+        decision = step.get("decision") or {}
+        outcome = step.get("outcome") or {}
+        action = decision.get("action_type") or "unknown"
+        by_action[action][outcome.get("status", "uncertain")] += 1
+        if decision.get("refusal_reason"):
+            failure_reasons[decision["refusal_reason"]] += 1
+        error = step.get("error") or {}
+        if error:
+            errors[f"{error.get('type', 'Error')}: {error.get('message', '')}"] += 1
+    streaks = [(step.get("loop") or {}).get("no_effect_streak", 0) for step in steps]
+    camera_streaks = [(step.get("loop") or {}).get("camera_only_streak", 0) for step in steps]
+    ram = [row.get("process_ram_mb") for row in resources if _number(row.get("process_ram_mb"))]
+    vram = [row.get("gpu_vram_used_mb") for row in resources if _number(row.get("gpu_vram_used_mb"))]
+    fallback_steps = sum(bool((step.get("decision") or {}).get("fallback_reason")) for step in steps)
+    skill_steps = _read_jsonl(run_dir / "skill_steps.jsonl")
+    goal_events = _read_jsonl(run_dir / "goal_steps.jsonl")
+    skill_outcomes = defaultdict(Counter)
+    for row in skill_steps:
+        if row.get("event") == "finish":
+            result = row.get("result") or {}
+            if result.get("status"):
+                skill_outcomes[row.get("skill", "unknown")][result["status"]] += 1
+
+    lines = [
+        f"Отчёт о прогоне: {meta.get('run_id', run_dir.name)}",
+        f"Длительность: {duration_s:.1f} с; шагов: {len(steps)}; шагов/мин: {'—' if rate is None else f'{rate:.2f}'}",
+        f"Причина завершения: {meta.get('termination_reason') or 'ещё выполняется'}",
+        "",
+        "Тайминги этапов (среднее / медиана / p95 / доля общего времени):",
+    ]
+    for key, label in STAGES:
+        values = stage_values[key]
+        avg = statistics.mean(values) if values else None
+        med = statistics.median(values) if values else None
+        p95 = _p95(values)
+        share = (sum(values) / total_sum * 100) if values and total_sum > 0 else None
+        lines.append(f"  {label}: {_ms(avg)} / {_ms(med)} / {_ms(p95)} / {'—' if share is None else f'{share:.1f}%'}")
+    lines.extend(["", "Действия и результаты:"])
+    if by_action:
+        for action in sorted(by_action):
+            counts = by_action[action]
+            total = sum(counts.values())
+            percentages = ", ".join(f"{status} {counts[status] * 100 / total:.1f}%" for status in STATUSES)
+            lines.append(f"  {action}: {total}; {percentages}")
+    else:
+        lines.append("  Нет записанных шагов")
+    lines.extend(["", "Частые причины отказов:"])
+    lines.extend(f"  {reason}: {count}" for reason, count in failure_reasons.most_common(5))
+    if not failure_reasons:
+        lines.append("  Нет")
+    lines.append("Частые ошибки:")
+    lines.extend(f"  {reason}: {count}" for reason, count in errors.most_common(5))
+    if not errors:
+        lines.append("  Нет")
+    lines.append(f"Максимальная серия шагов без видимого эффекта: {max(streaks, default=0)}")
+    lines.append(f"Максимальная серия look/wait: {max(camera_streaks, default=0)}")
+    lines.append(f"Шагов с fallback: {fallback_steps} ({fallback_steps * 100 / len(steps):.1f}%)" if steps
+                 else "Шагов с fallback: 0 (—)")
+    lines.append(f"RAM процесса, пик/среднее: {_mb(max(ram) if ram else None)} / {_mb(statistics.mean(ram) if ram else None)}")
+    lines.append(f"VRAM, пик/среднее: {_mb(max(vram) if vram else None)} / {_mb(statistics.mean(vram) if vram else None)}")
+    lines.extend(["", "Пять самых долгих шагов:"])
+    ranked = sorted(steps, key=lambda step: step.get("timings_ms", {}).get("total") or -1, reverse=True)[:5]
+    for step in ranked:
+        timings = step.get("timings_ms") or {}
+        detail = ", ".join(f"{key}={timings.get(key):.1f}" for key, _ in STAGES[:-1]
+                            if _number(timings.get(key)))
+        lines.append(f"  шаг {step.get('step')}: total={_ms(timings.get('total'))}; {detail}")
+    if (run_dir / "skill_steps.jsonl").exists():
+        result = meta.get("skill_result") or {}
+        final_result = next((row.get("result") for row in reversed(skill_steps)
+                             if row.get("event") == "finish" and row.get("result")), {})
+        state = result.get("state") or final_result.get("status", "не записано")
+        reason = result.get("reason") or final_result.get("reason", "не записана")
+        latencies = []
+        heights = []
+        for row in skill_steps:
+            latency = row.get("detector_latency_ms") or {}
+            for value in latency.values():
+                if _number(value):
+                    latencies.append(value)
+            height = (row.get("h") or {}).get("after")
+            if _number(height):
+                heights.append((row.get("iteration"), height))
+        lines.extend(["", "Сводка навыков:"])
+        if skill_outcomes:
+            for skill_name, outcomes in sorted(skill_outcomes.items()):
+                counts = ", ".join(f"{status}: {count}" for status, count in sorted(outcomes.items()))
+                lines.append(f"  {skill_name}: {counts}")
+        else:
+            lines.append("  Нет финальных результатов в общем формате")
+        lines.extend([
+            "", "Подробности последнего навыка:",
+            f"  Состояние: {state}; причина: {reason}",
+            f"  Итераций: {result.get('iterations', len(skill_steps))}; время: "
+            f"{result.get('elapsed_seconds', 'не записано')} с",
+            f"  Средняя задержка детектора: {_ms(statistics.mean(latencies) if latencies else None)}",
+            "  Кривая h по итерациям: " + (", ".join(f"{step}={height:.3f}" for step, height in heights)
+                                             if heights else "нет измерений"),
+        ])
+    if goal_events:
+        plans = [row for row in goal_events if row.get("event") == "plan"]
+        would_send = [row for row in goal_events if row.get("event") == "would_send"]
+        goal_result = next((row for row in reversed(goal_events) if row.get("event") == "run_finish"), {})
+        lines.extend(["", "Сводка goal-режима:",
+                      f"  Проверенных планов: {len(plans)}; перепланирований: {max(0, len(plans) - 1)}",
+                      f"  would_send: {len(would_send)}",
+                      f"  Завершение: {goal_result.get('status', 'не записано')} — "
+                      f"{goal_result.get('reason', 'не записана')}"])
+    return "\n".join(lines)
+
+
+def latest_run(runs_dir):
+    candidates = [path for path in Path(runs_dir).iterdir()
+                  if path.is_dir() and (path / "run_meta.json").exists()]
+    if not candidates:
+        raise FileNotFoundError(f"Нет прогонов в {runs_dir}")
+    return max(candidates, key=lambda path: path.stat().st_mtime)
+
+
+def main(argv=None):
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (OSError, ValueError):
+                pass
+    default_runs = Path(__file__).resolve().parents[1] / "data" / "runs"
+    parser = argparse.ArgumentParser(description="Сводка телеметрии OmniGamer")
+    parser.add_argument("run_dir", nargs="?", help="Путь к каталогу прогона; по умолчанию последний прогон")
+    args = parser.parse_args(argv)
+    try:
+        run_dir = Path(args.run_dir) if args.run_dir else latest_run(default_runs)
+        print(summarize(run_dir))
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        parser.error(str(exc))
+
+
+if __name__ == "__main__":
+    main()

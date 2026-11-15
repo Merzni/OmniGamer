@@ -1,0 +1,9 @@
+# Install PyTorch with the official command matching the local CUDA/CPU runtime.
+torch
+torchvision
+transformers
+fastapi
+uvicorn
+pydantic
+pillow
+numpy

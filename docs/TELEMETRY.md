@@ -1,0 +1,52 @@
+# Телеметрия прогонов
+
+## Записи явных навыков
+
+Файл `skill_steps.jsonl` использует версионированную общую оболочку: `schema_version`, `skill`, `iteration`, `phase`, `event`, `args` и `result`. Записи шагов помечены `event=step`, содержат `step_state`, действие и evidence; завершение навыка записывается отдельной строкой `event=finish` с `SkillResult` (`status`, `result_code`, `reason`, `evidence`, `duration_seconds`). `ApproachTargetRecorder` сохраняет прежние диагностические поля detector/h/box рядом с общей оболочкой. Реестровый executor требует recorder или `RunTelemetry` до старта навыка. `tools/summarize_run.py` группирует финальные статусы по навыкам; старые skill JSONL без `event` продолжают разбираться для диагностической кривой approach.
+
+Калибровочные образцы регионов и агрегированные метрики размещаются в `data/diagnostics/region_metric/`; сохранённые изображения остаются в run-каталогах и не встраиваются в документацию. В отчётах фиксируются тип sample, число образцов, крайние значения и false-positive/false-negative rates.
+
+Телеметрия записывает наблюдения цикла агента и не меняет выбор действия или проверки результата. Она включена по умолчанию настройкой `telemetry_enabled`; ошибки создания/записи файлов перехватываются, один раз логируются и не передаются в игровой цикл.
+
+## Каталог и файлы
+
+Каждый запуск CLI-цикла или панельной серии шагов получает каталог `data/runs/<run_id>/`, где `run_id` имеет вид `YYYYMMDD_HHMMSS_<6 hex символов>`.
+
+- `run_meta.json` содержит UTC-время начала/конца, причину завершения, окно/HWND, `game_id`, input backend, alias и URL VLM, параметры конфигурации и число записанных шагов. При `termination_reason=error` дополнительно записывается короткое поле `error` (`тип: текст`, без traceback). Причины: `step_limit`, `f12`, `error`, `panel_stop`, `single_step`.
+- `steps.jsonl` — одна JSON-строка на шаг. Времена ISO-8601 UTC; `timings_ms` хранит capture, memory_lookup, vlm_decide, grounding, input_send, post_wait, preflight_eval, result_eval, memory_write и total. Неприменимые или недоступные значения — `null`. `decision.raw_json_attempts` содержит ответы модели до разбора, `decision.final` — итог после защит. `decision.http_requests` содержит длительность и тип каждого HTTP-запроса (decide/preflight/post_check), `http_request_counts` — их количества.
+- `prompts.jsonl` — подмешанный в каждый шаг текст контекста памяти и необязательная цель; контекст ограничен 12 000 символами. Полный system prompt и изображение не дублируются в этом файле.
+- `goal_steps.jsonl` — события режима `--goal`: проверенный план/перепланирование, исход навыка, `would_send` в dry-run и причина завершения. Кадры в файл не помещаются. В CLI `--dry-run` SQLite эпизодической памяти изолирована в `:memory:`; JSONL run остаётся в `data/runs/`.
+- SQLite `skill_outcomes` — эпизодические исходы по `game_id`, навыку и тексту цели с результатом, длительностью, временем и run_id. Сводка передаётся планировщику; веса модели не обучаются.
+- `skill_steps.jsonl` — версионированные шаги реестровых навыков и финальные `SkillResult`; `tools/summarize_run.py` группирует исходы по навыкам.
+- `resources.jsonl` — выборка примерно каждые `telemetry_resource_interval_s` секунд (первая — при старте мониторинга): working set процесса агента в МБ, использованная VRAM в МБ и загрузка GPU в процентах. GPU-значения читаются через `nvidia-smi` в отдельном потоке с timeout 1.5 с; если утилита отсутствует/запрос не проходит, оба GPU-поля равны `null`, а предупреждение пишется один раз.
+- `frames/` содержит JPEG-пары `before`/`after` для первого шага, каждого `telemetry_frame_every_n`-го шага и шагов с ошибкой, отказом или неопределённой оценкой. Длинная сторона ограничена 640 px, quality=80. При достижении `telemetry_frames_max_mb` дальнейшая запись кадров отключается и пишется одно предупреждение.
+
+Размер и интервал регулируются в `omnigamer/config.py`: `telemetry_frame_every_n=20`, `telemetry_resource_interval_s=10`, `telemetry_frames_max_mb=500`. Для отключения записи установите `telemetry_enabled=False`.
+
+При старте нового run каталоги под `data/runs/` ограничиваются настройками `telemetry_runs_max_count=100` и `telemetry_runs_max_mb=5000`: старейшие завершённые каталоги с `run_meta.json` удаляются, чтобы освободить место. Неуправляемые папки и симлинки не затрагиваются. Не включайте retention, если нужна бессрочная история.
+
+## Содержание строки шага
+
+```json
+{"step":1,"run_step":1,"ts_start":"2026-11-14T12:00:00.000+00:00","ts_end":"2026-11-14T12:00:00.500+00:00","timings_ms":{"capture":12.0,"memory_lookup":4.0,"vlm_decide":350.0,"grounding":0.0,"input_send":80.0,"post_wait":100.0,"result_eval":20.0,"memory_write":8.0,"total":500.0},"decision":{"action_type":"walk","action_source":"vlm","parameters":{"x":null,"y":null,"x2":null,"y2":null,"key":"w","duration":0.6},"decision_calls":1,"vlm_retries":0,"vlm_http_requests":1,"refusal_reason":null,"guard":null},"outcome":{"image_delta":0.01,"verdict":"blocked","checker_called":true,"status":"no_effect"},"loop":{"no_effect_streak":2,"camera_only_streak":0,"repeat_warning":false},"memory":{"similar_records":3,"experience_written":true,"lesson_written":false},"error":null}
+```
+
+`verdict` — ответ визуального проверяющего (`progress`, `blocked`, `regressed`, `unknown` или `null`). `status` включает `success`, `no_effect`, `uncertain`, `refusal` и `camera_motion`; look/wait по умолчанию не отправляются на проверку результата и не становятся learnable/effective от одной дельты кадров. `decision_calls` считает запросы акторной логики, `vlm_retries` — повторные решения, `vlm_http_requests` — все HTTP-запросы VLM за шаг, включая grounding и проверку. Ошибка содержит только тип и короткое сообщение, без traceback.
+
+`decision.action_source` указывает источник итогового действия (`vlm`, `camera_guard`, `strategy_recovery`, `navigation_recovery`, `menu_memory` и другие значения, задаваемые агентом). Для каждого исходного предложения `mine` поле `decision.guard` сохраняет доступные pitch/scene/safe_footing, флаги уверенности и источник фактов; если был отдельный preflight, там же находятся разобранная оценка и её сырой ответ (если клиент его сохранил). `refusal_condition` перечисляет точные проверки, провалившиеся при отказе CameraGuard.
+
+`loop.no_effect_streak` не растёт и не сбрасывается на шагах со статусом `camera_motion` (look/wait); для прочих действий остаётся прежнее правило по `effective`. `loop.camera_only_streak` считает подряд look/wait независимо от исхода и сбрасывается на любом другом действии. В `tools/summarize_run.py` выводятся максимумы обеих серий.
+
+`loop.state_repeat`, `loop.repeat_of_step` и `loop.look_oscillation` отражают совпадение dHash с одним из последних восьми состояний (Hamming distance ≤4) и чередование направлений look A-B-A-B. Детектор продолжает записывать эти признаки; запуск recovery по его событию управляется `state_repeat_triggers_recovery` и по умолчанию выключен. Настройка `state_repeat_detection_enabled` отключает сам детектор. Отдельный таймерный recovery PlaySupervisor остаётся включён по своим порогам шагов/времени.
+
+При F12 или остановке панели, в том числе во время шага, итоговая запись ждёт завершения/прерывания этого шага, затем сбрасывает JSONL и записывает `ended_at` и `termination_reason`. Уже отправленный запрос модели не отменяется на сервере.
+
+## Отчёт
+
+```powershell
+.\.venv\Scripts\python.exe tools\summarize_run.py data\runs\<run_id>
+# Без пути — самый новый каталог с run_meta.json
+.\.venv\Scripts\python.exe tools\summarize_run.py
+```
+
+Скрипт `tools/summarize_run.py` использует только стандартную библиотеку. Он печатает длительность, темп шагов, среднее/медиану/p95 и долю времени для каждого этапа, распределение исходов по действиям, причины отказов/ошибок, максимальную серию без видимого эффекта, пики/средние RAM и VRAM и пять самых долгих шагов. p95 считается методом ближайшего ранга (`ceil(0.95 × N)`). Для короткого прогона ресурсы могут отсутствовать; тогда значения выводятся как `—`.

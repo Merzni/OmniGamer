@@ -1,0 +1,19 @@
+# Local environments and generated Python files
+.venv/
+**/__pycache__/
+*.py[cod]
+
+# Local runtime data can contain screenshots, logs, telemetry, and SQLite memory
+data/
+
+# Local credentials and machine configuration
+.env
+.env.*
+!.env.example
+
+# Editor and operating-system files
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+AGENTS.md
