@@ -86,10 +86,13 @@ class GoalPlannerTests(unittest.TestCase):
         def respond(**kwargs):
             calls.append(kwargs)
             return plan_for("unknown") if len(calls) == 1 else plan_for()
-        plan = GoalPlanner(self.registry, respond).plan(frame=None, goal="move", profile=self.profile)
+        planner = GoalPlanner(self.registry, respond)
+        plan = planner.plan(frame=None, goal="move", profile=self.profile)
         self.assertEqual(plan.steps[0].skill, "move_pulse")
         self.assertEqual(len(calls), 2)
         self.assertIn("Unknown skill", calls[1]["validation_error"])
+        self.assertEqual(len(planner.last_plan_metrics["request_durations_seconds"]), 2)
+        self.assertGreaterEqual(planner.last_plan_metrics["duration_seconds"], 0)
 
     def test_replan_rejects_same_failed_plan_before_execution(self):
         with tempfile.TemporaryDirectory() as temp:
