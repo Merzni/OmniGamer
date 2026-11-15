@@ -197,9 +197,16 @@ def summarize(run_dir):
         plans = [row for row in goal_events if row.get("event") == "plan"]
         would_send = [row for row in goal_events if row.get("event") == "would_send"]
         goal_result = next((row for row in reversed(goal_events) if row.get("event") == "run_finish"), {})
+        verified_examples = sum(row.get("verified_example_count", 0) for row in plans
+                                if _number(row.get("verified_example_count")))
+        memory_reuse = goal_result.get("memory_reuse_count")
+        if not _number(memory_reuse):
+            memory_reuse = sum(row.get("memory_reuse_count", 0) for row in plans
+                               if _number(row.get("memory_reuse_count")))
         lines.extend(["", "Сводка goal-режима:",
                       f"  Проверенных планов: {len(plans)}; перепланирований: {max(0, len(plans) - 1)}",
                       f"  would_send: {len(would_send)}",
+                      f"  Доступно verified-примеров по планам: {verified_examples}; точных повторов args: {memory_reuse}",
                       f"  Завершение: {goal_result.get('status', 'не записано')} — "
                       f"{goal_result.get('reason', 'не записана')}"])
     return "\n".join(lines)

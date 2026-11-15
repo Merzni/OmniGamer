@@ -328,6 +328,26 @@ class GoalExecutor:
         self.input_action_budget = input_action_budget
         self.result_verifier = result_verifier
         self.run_id, self.clock, self.logger, self.detector = run_id or uuid4().hex, clock, logger, detector
+        self.memory_reuse_count = 0
+
+    @staticmethod
+    def _memory_reuse_metrics(goal, outcomes, plan):
+        """Count exact skill-argument reuse of a latest verified example for this goal."""
+        verified_examples = {}
+        for outcome in outcomes:
+            example = outcome.get("verified_example")
+            if outcome.get("target") != goal or not isinstance(example, dict):
+                continue
+            args = example.get("args")
+            if isinstance(args, dict):
+                signature = json.dumps(args, sort_keys=True, separators=(",", ":"))
+                verified_examples[(outcome.get("skill"), signature)] = True
+        reused = 0
+        for step in plan.steps:
+            args = step.model_dump(mode="json")["args"]
+            signature = json.dumps(args, sort_keys=True, separators=(",", ":"))
+            reused += (step.skill, signature) in verified_examples
+        return len(verified_examples), reused
 
     def _verify_result(self, step, result, before, after, timeout_seconds):
         """Resolve a region-delta candidate only when a separate check supports it."""
@@ -385,6 +405,7 @@ class GoalExecutor:
                         "source": "error", "error": f"{type(exc).__name__}: {exc}"[:300]}}}
 
     def _finish(self, result):
+        result.setdefault("memory_reuse_count", self.memory_reuse_count)
         if self.input_action_budget is not None:
             result.setdefault("input_actions_used", self.input_action_budget.actions_used)
             result.setdefault("input_actions_limit", self.input_action_budget.max_actions)
@@ -447,9 +468,10 @@ class GoalExecutor:
             if plan_budget <= 0:
                 return self._finish({"status": "FAILED", "reason": "max_run_seconds", "steps": steps_used})
             frame = self.frame_provider()
+            outcome_summary = self.store.summary(self.game_id)
             try:
                 plan = self.planner.plan(frame=frame, goal=goal, profile=self.profile,
-                                         outcome_summary=self.store.summary(self.game_id), failure=failure,
+                                         outcome_summary=outcome_summary, failure=failure,
                                          timeout_seconds=plan_budget, avoid_plan=avoid_plan,
                                          failed_step=failed_step)
             except PlanningError as exc:
@@ -460,10 +482,15 @@ class GoalExecutor:
                 return self._finish({"status": "FAILED",
                                      "reason": f"planner_validation_failed{prior_failure}: {exc}",
                                      "steps": steps_used})
+            verified_example_count, memory_reuse_count = self._memory_reuse_metrics(
+                goal, outcome_summary, plan)
+            self.memory_reuse_count += memory_reuse_count
             current_plan_signature = self.planner.signature(plan, profile=self.profile)
             if self.logger:
                 self.logger({"event": "plan", "replan_index": replans, "goal": goal,
                              "steps": [step.model_dump(mode="json") for step in plan.steps],
+                             "verified_example_count": verified_example_count,
+                             "memory_reuse_count": memory_reuse_count,
                              **self.planner.last_plan_metrics,
                              "request_count": len(self.planner.last_plan_metrics["request_durations_seconds"])})
             failure = ""

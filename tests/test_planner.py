@@ -241,6 +241,37 @@ class GoalPlannerTests(unittest.TestCase):
             self.assertEqual(calls, [])
             self.assertEqual(logs[1]["event"], "would_send")
 
+    def test_goal_telemetry_counts_only_exact_verified_example_reuse_for_same_goal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SkillOutcomeStore(Path(tmp) / "outcomes.db")
+            store.record("sim", "move_pulse", "move", "SUCCESS_VERIFIED", 0.5, "prior",
+                         args={"direction": "forward", "seconds": 0.5},
+                         expected_result="closer", success_check="target moved closer")
+            planner = GoalPlanner(self.registry, lambda **_: plan_for())
+            logs = []
+            runner = GoalExecutor(planner, self.registry, store, profile=self.profile, game_id="sim",
+                execute_skill=lambda *_: self.fail("dry run executed"),
+                frame_provider=lambda: object(), stop_check=lambda: None, dry_run=True,
+                logger=logs.append)
+
+            result = runner.run("move")
+
+            plan_event = next(event for event in logs if event["event"] == "plan")
+            self.assertEqual(plan_event["verified_example_count"], 1)
+            self.assertEqual(plan_event["memory_reuse_count"], 1)
+            self.assertEqual(result["memory_reuse_count"], 1)
+
+            logs.clear()
+            other_goal = GoalExecutor(planner, self.registry, store, profile=self.profile, game_id="sim",
+                execute_skill=lambda *_: self.fail("dry run executed"),
+                frame_provider=lambda: object(), stop_check=lambda: None, dry_run=True,
+                logger=logs.append)
+            other_result = other_goal.run("move elsewhere")
+            other_plan = next(event for event in logs if event["event"] == "plan")
+            self.assertEqual(other_plan["verified_example_count"], 0)
+            self.assertEqual(other_plan["memory_reuse_count"], 0)
+            self.assertEqual(other_result["memory_reuse_count"], 0)
+
     def test_dry_run_detector_uses_profile_synonyms(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.profile.detector_queries = {"tree_trunk": ["a tree trunk", "a tree"]}

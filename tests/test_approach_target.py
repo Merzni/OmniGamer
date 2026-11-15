@@ -410,14 +410,15 @@ class ApproachTargetTests(unittest.TestCase):
         run_dir.mkdir()
         (run_dir / "run_meta.json").write_text(json.dumps({"run_id": "goal-run"}), encoding="utf-8")
         (run_dir / "goal_steps.jsonl").write_text(
-            '{"schema_version":1,"event":"plan","steps":[]}\n'
-            '{"schema_version":1,"event":"plan","replan_index":1,"steps":[]}\n'
+            '{"schema_version":1,"event":"plan","steps":[],"verified_example_count":1,"memory_reuse_count":1}\n'
+            '{"schema_version":1,"event":"plan","replan_index":1,"steps":[],"verified_example_count":0,"memory_reuse_count":0}\n'
             '{"schema_version":1,"event":"would_send","skill":"turn"}\n'
-            '{"schema_version":1,"event":"run_finish","status":"DRY_RUN","reason":"plan_completed"}\n',
+            '{"schema_version":1,"event":"run_finish","status":"DRY_RUN","reason":"plan_completed","memory_reuse_count":1}\n',
             encoding="utf-8")
         text = summarize(run_dir)
         self.assertIn("Проверенных планов: 2; перепланирований: 1", text)
         self.assertIn("would_send: 1", text)
+        self.assertIn("Доступно verified-примеров по планам: 1; точных повторов args: 1", text)
         self.assertIn("DRY_RUN — plan_completed", text)
 
 
