@@ -125,11 +125,23 @@ class GoalPlannerTests(unittest.TestCase):
             self.assertEqual(store.summary("a"), [{"skill": "move_pulse", "target": "move",
                                                     "successes": 1, "attempts": 3, "uncertain": 1,
                                                     "success_rate": 0.333,
-                                                    "verified_example": {"args": {
-                                                        "direction": "forward", "seconds": 0.5},
-                                                        "expected_result": "near object",
-                                                        "success_check": "target remains centered"}}])
+                                                    "verified_example": None}])
             self.assertEqual(store.summary("b")[0]["attempts"], 1)
+
+    def test_latest_success_reenables_example_after_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SkillOutcomeStore(Path(tmp) / "outcomes.db")
+            store.record("sim", "approach_target", "reach a tree", "SUCCESS_VERIFIED", 1, "r1",
+                         args={"target_text": "tree"}, expected_result="near the trunk",
+                         success_check="crosshair stays on trunk")
+            store.record("sim", "approach_target", "reach a tree", "FAILED", 2, "r2")
+            self.assertIsNone(store.summary("sim")[0]["verified_example"])
+
+            store.record("sim", "approach_target", "reach a tree", "SUCCESS", 1, "r3",
+                         args={"target_text": "birch trunk"}, expected_result="near the trunk",
+                         success_check="target remains centered")
+            self.assertEqual(store.summary("sim")[0]["verified_example"]["args"],
+                             {"target_text": "birch trunk"})
 
     def test_skill_outcome_store_additively_migrates_legacy_schema(self):
         with tempfile.TemporaryDirectory() as temp:
