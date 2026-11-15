@@ -185,16 +185,18 @@ class ApproachTargetSkill:
         try:
             rows = json.loads(self.calibration_path.read_text(encoding="utf-8"))
             value = rows.get(self.game_id, {})
-            k = float(value.get("k", 0))
+            k = float(value.get("normalized_error_per_camera_count", value.get("k", 0)))
             if math.isfinite(k) and k > 0:
-                return {"k": k, "invert": bool(value.get("invert", False))}
+                return {"k": k, "invert": bool(value.get("invert_horizontal", value.get("invert", False)))}
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             pass
         configured = getattr(self.profile, "calibration", {}) or {}
         try:
-            k = float(configured.get("k", configured.get("camera_counts_per_radian", 0)))
+            k = float(configured.get("normalized_error_per_camera_count",
+                                     configured.get("k", configured.get("camera_counts_per_radian", 0))))
             if math.isfinite(k) and k > 0:
-                return {"k": k, "invert": bool(configured.get("invert", configured.get("invert_horizontal", False)))}
+                return {"k": k, "invert": bool(configured.get("invert_horizontal",
+                                                                  configured.get("invert", False)))}
         except (TypeError, ValueError):
             pass
         return None
@@ -207,7 +209,8 @@ class ApproachTargetSkill:
                 rows = {}
         except (OSError, ValueError, json.JSONDecodeError):
             rows = {}
-        rows[self.game_id] = {"k": round(float(k), 8), "invert": bool(invert),
+        rows[self.game_id] = {"normalized_error_per_camera_count": round(float(k), 8),
+                              "invert_horizontal": bool(invert),
                               "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         temporary = self.calibration_path.with_suffix(self.calibration_path.suffix + ".tmp")
         temporary.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")

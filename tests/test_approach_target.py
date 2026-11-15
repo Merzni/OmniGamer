@@ -340,12 +340,24 @@ class ApproachTargetTests(unittest.TestCase):
         ])
         skill.run()
         stored = json.loads(self.calibration.read_text(encoding="utf-8"))["game:test"]
-        self.assertTrue(stored["invert"])
+        self.assertTrue(stored["invert_horizontal"])
+        self.assertGreater(stored["normalized_error_per_camera_count"], 0)
+        loaded = skill._read_calibration()
+        self.assertAlmostEqual(loaded["k"], skill._calibration["k"], places=8)
+        self.assertEqual(loaded["invert"], skill._calibration["invert"])
         looks = [call[1] for call in controls.calls if call[0] == "look"]
         self.assertGreater(looks[0], 0)
         self.assertLess(looks[1], 0)
 
     def test_profile_camera_calibration_is_used_when_no_saved_calibration_exists(self):
+        missing = Path(self.temp.name) / "missing-calibration.json"
+        skill, _, _ = self.make_skill([[box(0.5, 0.2)]], profile=GameProfile(
+            game_id="test", calibration={"normalized_error_per_camera_count": 0.02,
+                                           "invert_horizontal": True}),
+            calibration_path=missing)
+        self.assertEqual(skill._calibration, {"k": 0.02, "invert": True})
+
+    def test_legacy_profile_camera_counts_key_remains_readable(self):
         missing = Path(self.temp.name) / "missing-calibration.json"
         skill, _, _ = self.make_skill([[box(0.5, 0.2)]], profile=GameProfile(
             game_id="test", calibration={"camera_counts_per_radian": 0.02,
