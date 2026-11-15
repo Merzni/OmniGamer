@@ -353,10 +353,19 @@ class GoalExecutor:
             reused += (step.skill, signature) in verified_examples
         return len(verified_examples), reused
 
-    def _verify_result(self, step, result, before, after, timeout_seconds):
-        """Resolve a region-delta candidate only when a separate check supports it."""
-        if result.get("result_code") not in {"REGION_CHANGE_UNCONFIRMED", "SUCCESS_REGION_CHANGE"}:
+    def _verify_result(self, step, result, before, after, timeout_seconds, *, force=False):
+        """Verify region-delta candidates and final goal postconditions."""
+        needs_check = result.get("result_code") in {"REGION_CHANGE_UNCONFIRMED", "SUCCESS_REGION_CHANGE"}
+        if not force and not needs_check:
             return result
+        if force and result.get("status") != SkillStatus.SUCCESS.value:
+            return result
+        if self.result_verifier is None:
+            if not force:
+                return {**result, "status": SkillStatus.UNCONFIRMED.value,
+                        "result_code": "UNCONFIRMED", "reason": "region_changed_without_success_check"}
+            return {**result, "status": SkillStatus.UNCONFIRMED.value,
+                    "result_code": "UNCONFIRMED", "reason": "goal_result_unverified"}
         evidence = dict(result.get("evidence") or {})
         if timeout_seconds <= 0:
             return {**result, "status": SkillStatus.UNCONFIRMED.value,
@@ -498,7 +507,8 @@ class GoalExecutor:
                              **self.planner.last_plan_metrics,
                              "request_count": len(self.planner.last_plan_metrics["request_durations_seconds"])})
             failure = ""
-            for step in plan.steps:
+            for step_index, step in enumerate(plan.steps):
+                is_final_step = step_index == len(plan.steps) - 1
                 self.stop_check()
                 if self.input_action_budget is not None and self.input_action_budget.exhausted:
                     return self._finish({"status": "FAILED", "reason": "max_actions", "steps": steps_used})
@@ -552,16 +562,20 @@ class GoalExecutor:
                         self.logger({"event": "would_send", **resolved})
                 else:
                     verification_before = (self.frame_provider() if self.result_verifier and
-                                           step.skill == "interact_until_change" else None)
+                                           (step.skill == "interact_until_change" or is_final_step)
+                                           else None)
                     result = self.execute_skill(spec, params, available)
                     result = result.model_dump() if hasattr(result, "model_dump") else result
-                    if (step.skill == "interact_until_change" and result.get("result_code") in {
-                            "REGION_CHANGE_UNCONFIRMED", "SUCCESS_REGION_CHANGE"}):
+                    region_change_candidate = result.get("result_code") in {
+                        "REGION_CHANGE_UNCONFIRMED", "SUCCESS_REGION_CHANGE"}
+                    verify_final = is_final_step and result.get("status") == SkillStatus.SUCCESS.value
+                    if (step.skill == "interact_until_change" and region_change_candidate) or verify_final:
                         verification_after = self.frame_provider() if self.result_verifier else None
                         verification_budget = self.profile.motion_limits.max_run_seconds - (
                             self.clock() - started)
                         result = self._verify_result(step, result, verification_before,
-                                                     verification_after, verification_budget)
+                                                     verification_after, verification_budget,
+                                                     force=verify_final)
                 status = result.get("status", "FAILED")
                 duration = result.get("duration_seconds", max(0.0, self.clock() - begin))
                 if not self.dry_run:
@@ -573,6 +587,9 @@ class GoalExecutor:
                     self.logger({"event": "skill_result", "skill": step.skill,
                                  "args": step.args, "result": result})
                 steps_used += 1
+                if result.get("reason") == "goal_result_unverified":
+                    return self._finish({"status": SkillStatus.UNCONFIRMED.value,
+                                         "reason": result["reason"], "steps": steps_used})
                 if (self.input_action_budget is not None and self.input_action_budget.exhausted
                         and status != SkillStatus.SUCCESS.value):
                     return self._finish({"status": "FAILED", "reason": "max_actions", "steps": steps_used})
@@ -586,7 +603,39 @@ class GoalExecutor:
                             goal, params["target_text"], started, steps_used)
                         steps_used += recovery_steps
                         if recovered and recovered.get("status") == SkillStatus.SUCCESS.value:
-                            continue
+                            if is_final_step:
+                                if self.result_verifier:
+                                    verification_after = self.frame_provider()
+                                    verification_budget = self.profile.motion_limits.max_run_seconds - (
+                                        self.clock() - started)
+                                    recovered = self._verify_result(
+                                        step, recovered, verification_before, verification_after,
+                                        verification_budget, force=True)
+                                else:
+                                    recovered = {**recovered,
+                                        "status": SkillStatus.UNCONFIRMED.value,
+                                        "result_code": "UNCONFIRMED",
+                                        "reason": "goal_result_unverified"}
+                                if not self.dry_run:
+                                    self.store.record(
+                                        self.game_id, step.skill, goal,
+                                        recovered.get("result_code") or recovered.get("status", "FAILED"),
+                                        recovered.get("duration_seconds", 0.0), self.run_id,
+                                        args=params, expected_result=step.expected_result,
+                                        success_check=step.success_check)
+                                if self.logger:
+                                    self.logger({"event": "goal_postcondition", "skill": step.skill,
+                                                 "result": recovered})
+                                if recovered.get("reason") == "goal_result_unverified":
+                                    return self._finish({"status": SkillStatus.UNCONFIRMED.value,
+                                        "reason": recovered["reason"], "steps": steps_used})
+                                if recovered.get("status") == SkillStatus.SUCCESS.value:
+                                    return self._finish({"status": "SUCCESS", "reason": "plan_completed",
+                                                         "steps": steps_used})
+                                result = recovered
+                                status = result.get("status", "FAILED")
+                            else:
+                                continue
                         if recovered:
                             result = recovered
                     failure = f"{step.skill}: {status}: {result.get('reason', '')}; expected={step.expected_result}; check={step.success_check}"

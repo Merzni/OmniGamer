@@ -20,6 +20,18 @@ def plan_for(skill="move_pulse", args=None):
                        "expected_result": "move", "success_check": "result status"}]}
 
 
+class ConfirmedAssessment:
+    result = "progress"
+    confidence = 0.95
+    evidence = "Expected visible goal state is present"
+    evidence_source = "test_fixture"
+    usable = True
+
+
+def confirm_goal(*_args):
+    return ConfirmedAssessment()
+
+
 class GoalPlannerTests(unittest.TestCase):
     def setUp(self):
         self.profile = GameProfile(game_id="sim", motion_limits={"max_run_seconds": 20, "max_actions": 3})
@@ -117,7 +129,7 @@ class GoalPlannerTests(unittest.TestCase):
 
             runner = GoalExecutor(planner, self.registry, store, profile=self.profile, game_id="sim",
                 execute_skill=execute, frame_provider=lambda: object(), stop_check=lambda: None,
-                max_replans=1)
+                max_replans=1, result_verifier=confirm_goal)
             result = runner.run("move")
             self.assertEqual(result["status"], "SUCCESS")
             self.assertEqual(executions, [("move_pulse", "forward"), ("move_pulse", "backward")])
@@ -151,7 +163,7 @@ class GoalPlannerTests(unittest.TestCase):
 
             runner = GoalExecutor(planner, self.registry, store, profile=self.profile, game_id="sim",
                 execute_skill=execute, frame_provider=lambda: object(), stop_check=lambda: None,
-                max_replans=1)
+                max_replans=1, result_verifier=confirm_goal)
             result = runner.run("approach target")
             self.assertEqual(result["status"], "SUCCESS")
             self.assertEqual(executions, ["tree trunk", "rock"])
@@ -377,6 +389,45 @@ class GoalPlannerTests(unittest.TestCase):
             self.assertEqual(summary["uncertain"], 1)
             self.assertIsNone(summary["verified_example"])
 
+    def test_goal_result_is_unconfirmed_without_final_postcondition_verifier(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = SkillOutcomeStore(Path(temp) / "outcomes.db")
+            runner = GoalExecutor(
+                GoalPlanner(self.registry, lambda **_: plan_for()), self.registry, store,
+                profile=self.profile, game_id="sim",
+                execute_skill=lambda *_: SkillResult(status=SkillStatus.SUCCESS,
+                    result_code="SUCCESS", reason="movement_sent"),
+                frame_provider=lambda: object(), stop_check=lambda: None, max_replans=0)
+            result = runner.run("reach the target")
+            summary = store.summary("sim")[0]
+            self.assertEqual((result["status"], result["reason"]),
+                             ("UNCONFIRMED", "goal_result_unverified"))
+            self.assertEqual(summary["successes"], 0)
+            self.assertEqual(summary["uncertain"], 1)
+
+    def test_final_postcondition_verification_promotes_command_to_verified_goal(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = SkillOutcomeStore(Path(temp) / "outcomes.db")
+            calls = []
+
+            def verify(step, _before, _after, result, _timeout):
+                calls.append((step.expected_result, step.success_check, result["result_code"]))
+                return ConfirmedAssessment()
+
+            runner = GoalExecutor(
+                GoalPlanner(self.registry, lambda **_: plan_for()), self.registry, store,
+                profile=self.profile, game_id="sim",
+                execute_skill=lambda *_: SkillResult(status=SkillStatus.SUCCESS,
+                    result_code="SUCCESS", reason="movement_sent"),
+                frame_provider=lambda: object(), stop_check=lambda: None,
+                result_verifier=verify)
+            result = runner.run("reach the target")
+            summary = store.summary("sim")[0]
+            self.assertEqual(result["status"], "SUCCESS")
+            self.assertEqual(calls, [("move", "result status", "SUCCESS")])
+            self.assertEqual(summary["successes"], 1)
+            self.assertIsNotNone(summary["verified_example"])
+
     def test_success_check_can_confirm_or_reject_region_delta(self):
         class Assessment:
             def __init__(self, verdict, confidence=.95, evidence="visible item count increased"):
@@ -430,13 +481,16 @@ class GoalPlannerTests(unittest.TestCase):
 
             runner = GoalExecutor(planner, self.registry, store, profile=self.profile, game_id="sim",
                 execute_skill=execute, frame_provider=lambda: object(), stop_check=lambda: None,
-                max_replans=0)
+                max_replans=0, result_verifier=confirm_goal)
             result = runner.run("get a tree")
             self.assertEqual(result["status"], "SUCCESS")
             self.assertEqual([name for name, _ in calls],
                              ["approach_target", "turn", "search_target", "approach_target"])
             self.assertEqual(len(planner_calls), 1)
             self.assertEqual(result["steps"], 4)
+            approach_summary = next(item for item in store.summary("sim")
+                                    if item["skill"] == "approach_target")
+            self.assertIsNotNone(approach_summary["verified_example"])
 
     def test_lost_target_uses_local_search_and_reapproach(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -456,11 +510,14 @@ class GoalPlannerTests(unittest.TestCase):
 
             runner = GoalExecutor(planner, self.registry, store, profile=self.profile, game_id="sim",
                 execute_skill=execute, frame_provider=lambda: object(), stop_check=lambda: None,
-                max_replans=0)
+                max_replans=0, result_verifier=confirm_goal)
             result = runner.run("get a tree")
             self.assertEqual(result["status"], "SUCCESS")
             self.assertEqual(calls, ["approach_target", "turn", "search_target", "approach_target"])
             self.assertEqual(len(planner_calls), 1)
+            approach_summary = next(item for item in store.summary("sim")
+                                    if item["skill"] == "approach_target")
+            self.assertIsNotNone(approach_summary["verified_example"])
 
     def test_planner_failure_and_action_limit_fail_closed(self):
         with tempfile.TemporaryDirectory() as tmp:

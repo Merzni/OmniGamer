@@ -194,7 +194,7 @@ def main():
                         print("would send: " + json.dumps(row, ensure_ascii=False))
 
                 def verify_skill_result(step, before, after, result, timeout_seconds):
-                    action = {"action_type": "interact_until_change",
+                    action = {"action_type": step.skill,
                               "parameters": step.args,
                               "expected_result": step.expected_result,
                               "success_check": step.success_check}
