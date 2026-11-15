@@ -237,11 +237,34 @@ class GoalPlanner:
             validated.append(step)
         return GoalPlan(steps=validated)
 
-    def signature(self, plan):
-        """Return normalized skill/argument pairs for detecting exact plan repeats."""
-        return tuple((step.skill, json.dumps(
+    @staticmethod
+    def _canonical_args(skill, args, profile=None):
+        """Normalize detector aliases so wording changes do not hide a repeated strategy."""
+        values = dict(args)
+        field = "target_text" if "target_text" in values else "query" if "query" in values else None
+        if (profile is None or field is None or
+                skill not in {"search_target", "approach_target", "wait_for_condition"}):
+            return values
+
+        def normalize(text):
+            return " ".join(str(text).casefold().split()).strip(" .,!?:;")
+
+        target = normalize(values[field])
+        for label, synonyms in (profile.detector_queries or {}).items():
+            canonical = normalize(label.replace("_", " "))
+            aliases = {normalize(alias) for alias in synonyms}
+            aliases.add(canonical)
+            if target in aliases:
+                values[field] = f"@detector:{canonical}"
+                break
+        return values
+
+    def signature(self, plan, profile=None):
+        """Return skill/argument pairs with profile detector aliases collapsed."""
+        return tuple((step.skill, json.dumps(self._canonical_args(
+            step.skill,
             self.registry.get(step.skill).validate_args(step.args).model_dump(mode="json"),
-            sort_keys=True, separators=(",", ":"))) for step in plan.steps)
+            profile), sort_keys=True, separators=(",", ":"))) for step in plan.steps)
 
     def plan(self, *, frame, goal, profile, outcome_summary=(), failure="", timeout_seconds=None,
              avoid_plan=None, failed_step=None):
@@ -267,14 +290,16 @@ class GoalPlanner:
                     request_durations.append(max(0.0, time.monotonic() - request_started))
                 try:
                     plan = self.validate(raw, profile=profile)
-                    signature = self.signature(plan)
+                    signature = self.signature(plan, profile=profile)
                     if avoid_plan is not None and signature == avoid_plan:
                         raise ValueError("Plan exactly repeats the previous failed plan; choose a different strategy.")
                     if failed_step is not None and plan.steps:
                         failed_name, failed_args = failed_step
                         first = plan.steps[0]
                         first_args = self.registry.get(first.skill).validate_args(first.args).model_dump(mode="json")
-                        if first.skill == failed_name and first_args == failed_args:
+                        if (first.skill == failed_name and self._canonical_args(
+                                first.skill, first_args, profile) == self._canonical_args(
+                                failed_name, failed_args, profile)):
                             raise ValueError("Plan starts by repeating the immediately failed skill with identical arguments.")
                     return plan
                 except (ValidationError, ValueError, TypeError) as exc:
@@ -435,7 +460,7 @@ class GoalExecutor:
                 return self._finish({"status": "FAILED",
                                      "reason": f"planner_validation_failed{prior_failure}: {exc}",
                                      "steps": steps_used})
-            current_plan_signature = self.planner.signature(plan)
+            current_plan_signature = self.planner.signature(plan, profile=self.profile)
             if self.logger:
                 self.logger({"event": "plan", "replan_index": replans, "goal": goal,
                              "steps": [step.model_dump(mode="json") for step in plan.steps],

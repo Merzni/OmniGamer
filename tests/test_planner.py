@@ -123,6 +123,40 @@ class GoalPlannerTests(unittest.TestCase):
             self.assertEqual(executions, [("move_pulse", "forward"), ("move_pulse", "backward")])
             self.assertIn("exactly repeats", requests[2]["validation_error"])
 
+    def test_replan_rejects_detector_alias_repeat(self):
+        with tempfile.TemporaryDirectory() as temp:
+            self.profile.detector_queries = {
+                "tree_trunk": ["tree trunk", "a tree trunk", "a tree"]}
+            store = SkillOutcomeStore(Path(temp) / "outcomes.db")
+
+            def approach(target):
+                return {"steps": [{"skill": "approach_target", "args": {"target_text": target},
+                                   "expected_result": "target reached", "success_check": "aligned"}]}
+
+            requests = []
+            responses = [approach("tree trunk"), approach("a tree trunk"), approach("rock")]
+
+            def request(**kwargs):
+                requests.append(kwargs)
+                return responses.pop(0)
+
+            planner = GoalPlanner(self.registry, request)
+            executions = []
+
+            def execute(spec, args, _remaining):
+                executions.append(args["target_text"])
+                if len(executions) == 1:
+                    return SkillResult(status=SkillStatus.FAILED, result_code="FAILED", reason="lost")
+                return SkillResult(status=SkillStatus.SUCCESS, result_code="SUCCESS", reason="reached")
+
+            runner = GoalExecutor(planner, self.registry, store, profile=self.profile, game_id="sim",
+                execute_skill=execute, frame_provider=lambda: object(), stop_check=lambda: None,
+                max_replans=1)
+            result = runner.run("approach target")
+            self.assertEqual(result["status"], "SUCCESS")
+            self.assertEqual(executions, ["tree trunk", "rock"])
+            self.assertIn("exactly repeats", requests[2]["validation_error"])
+
     def test_profile_actions_and_regions_are_schema_constrained(self):
         self.profile.actions = {"primary_hold": {"kind": "mouse", "value": "left"},
                                 "interact": {"kind": "mouse", "value": "right"}}
