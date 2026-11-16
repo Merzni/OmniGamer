@@ -95,7 +95,7 @@ def main():
         else:
             print("No specific window requested. Capturing the primary monitor; use --window to target a game.")
         if hwnd:
-            agent.attach(hwnd, selected_game_id)
+            agent.attach(hwnd, selected_game_id, focus=not args.dry_run)
         if args.skill:
             settings = ApproachTargetSettings.from_profile(profile)
             agent.telemetry.update_metadata(

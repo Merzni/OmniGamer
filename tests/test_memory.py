@@ -294,6 +294,36 @@ class AgentMemoryTests(unittest.TestCase):
         self.assertEqual(len(agent.recent_history), 1)
         self.assertIsNone(agent.last_decision)
 
+    def test_attach_without_focus_is_available_for_read_only_goal_runs(self):
+        agent = self.create()
+
+        class FakeCapture:
+            hwnd = 0
+            last_rect = None
+            visible_checks = 0
+            focus_calls = 0
+
+            def get_window_title(self):
+                return "Minecraft"
+
+            def assert_visible(self):
+                self.visible_checks += 1
+
+            def assert_foreground(self):
+                raise AssertionError("read-only attach must not require foreground")
+
+            def get_client_rect(self):
+                return (0, 0, 100, 100)
+
+            def focus(self):
+                self.focus_calls += 1
+
+        capture = FakeCapture()
+        agent.capture = capture
+        agent.attach(456, "creative", focus=False)
+        self.assertEqual(capture.focus_calls, 0)
+        self.assertEqual(capture.visible_checks, 1)
+
     def test_focus_failure_prevents_capture_inference_and_experience(self):
         agent = self.create()
         self.WindowCapture.return_value.focus.side_effect = RuntimeError("focus denied")

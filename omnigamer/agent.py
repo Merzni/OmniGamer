@@ -257,9 +257,11 @@ class OmniAgent:
             self.input_backend = backend
             self._build_controls()
 
-    def prepare_target(self):
-        if self.input_backend == "window":self.capture.assert_visible()
-        else:self.capture.focus()
+    def prepare_target(self, *, focus=True):
+        if self.input_backend == "window" or not focus:
+            self.capture.assert_visible()
+        else:
+            self.capture.focus()
 
     def check_target(self):
         if self.input_backend == "window":self.capture.assert_visible()
@@ -295,8 +297,8 @@ class OmniAgent:
             title=title.split(" - ",1)[0]
         return f"game:{explicit}" if explicit else (f"window:{title}" if title else "monitor:primary")
 
-    def attach(self, hwnd: int, game_id: str = ""):
-        """Switch memory and target together; never mix games' recent histories."""
+    def attach(self, hwnd: int, game_id: str = "", *, focus=True):
+        """Switch target and memory together; optionally avoid stealing foreground focus."""
         if game_id and self.profile is None:
             from .profiles import load_profile
             next_profile = load_profile(game_id)
@@ -328,7 +330,7 @@ class OmniAgent:
                 self.telemetry.update_metadata(window_title=self.capture.get_window_title(),
                                                hwnd=self.capture.hwnd or None, game_id=self.game_id,
                                                input_backend=self.input_backend)
-            self.prepare_target()
+            self.prepare_target(focus=focus)
 
     def step(self) -> Dict:
         self.start_emergency_hotkey()

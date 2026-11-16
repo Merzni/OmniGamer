@@ -178,7 +178,7 @@ class FakeAgent:
         self.telemetry = RunTelemetry(os.environ["OMNIGAMER_CFIX2_DATA"], resource_sampler_factory=QuietSampler)
     def begin_telemetry_run(self):
         return bool(self.telemetry.start({"window_title": "Fake Minecraft", "hwnd": self.hwnd, "game_id": self.game_id}))
-    def attach(self, hwnd, game_id=""):
+    def attach(self, hwnd, game_id="", *, focus=True):
         self.hwnd = hwnd
         if game_id:
             self.game_id = "game:" + game_id
