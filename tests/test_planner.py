@@ -209,6 +209,21 @@ class GoalPlannerTests(unittest.TestCase):
                               store.summary("b")[0]["attempts"],
                               store.summary("b")[0]["success_rate"]), (0, 1, 0.0))
 
+    def test_outcome_summary_limit_keeps_most_recent_groups(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SkillOutcomeStore(Path(tmp) / "outcomes.db")
+            for index in range(25):
+                store.record("sim", "move_pulse", f"target-{index:02d}", "SUCCESS_VERIFIED",
+                             1, f"run-{index}", args={"direction": "forward", "seconds": 0.5})
+
+            summary = store.summary("sim", max_groups=20)
+            targets = [item["target"] for item in summary]
+
+            self.assertEqual(targets[0], "target-24")
+            self.assertIn("target-24", targets)
+            self.assertNotIn("target-00", targets)
+            self.assertEqual(len(targets), 20)
+
     def test_latest_success_reenables_example_after_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = SkillOutcomeStore(Path(tmp) / "outcomes.db")

@@ -213,11 +213,14 @@ class SkillOutcomeStore:
                 if isinstance(args, dict):
                     state_item[1] = {"args": args, "expected_result": expected_result or "",
                                      "success_check": success_check or ""}
+        # ``rows`` is newest-first, so the first time a group is inserted into
+        # ``grouped`` is its latest outcome. Preserve that order when limiting
+        # prompt context; alphabetical truncation can discard fresh recipes.
         summaries = [{"skill": skill, "target": target, "successes": values[0], "attempts": values[1],
                       "uncertain": values[2], "success_rate": round(values[0] / values[1], 3),
                       "verified_example": (state_examples.get((skill, target), [False, None])[1]
                                            if state_hash is not None else values[3])}
-                     for (skill, target), values in sorted(grouped.items())]
+                     for (skill, target), values in grouped.items()]
         return summaries[:max(1, int(max_groups))]
 
 
