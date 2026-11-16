@@ -231,13 +231,25 @@ class GoalPlannerTests(unittest.TestCase):
                 store.record("sim", "move_pulse", f"goal-{index:02d}", "SUCCESS_VERIFIED",
                              1, f"run-{index}", args={"direction": "forward", "seconds": 0.5})
 
-            summary = store.summary("sim", max_groups=20, target="goal-00")
+            requests = []
+            planner = GoalPlanner(self.registry,
+                                  lambda **request: requests.append(request) or plan_for())
+            executor = GoalExecutor(planner, self.registry, store, profile=self.profile, game_id="sim",
+                                    execute_skill=lambda *_: self.fail("dry run executed"),
+                                    frame_provider=lambda: object(), stop_check=lambda: None,
+                                    dry_run=True)
+            result = executor.run("goal-00")
+
+            summary = requests[0]["outcome_summary"]
             targets = [item["target"] for item in summary]
 
             self.assertEqual(targets[0], "goal-00")
             self.assertIn("goal-00", targets)
             self.assertNotIn("goal-01", targets)
             self.assertEqual(len(targets), 20)
+            self.assertEqual(summary[0]["verified_example"]["args"],
+                             {"direction": "forward", "seconds": 0.5})
+            self.assertEqual(result["memory_reuse_count"], 1)
 
     def test_latest_success_reenables_example_after_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
