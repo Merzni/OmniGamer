@@ -103,7 +103,7 @@ class GameProfileTests(unittest.TestCase):
 
     def test_core_python_has_no_game_specific_control_vocabulary(self):
         source_root = Path(__file__).resolve().parents[1] / "omnigamer"
-        banned = ("minecraft", "hotbar", "key=e")
+        banned = ("minecraft", "hotbar", "key=e", "tree_trunk", "a tree trunk", "a tree")
         for path in source_root.rglob("*.py"):
             contents = path.read_text(encoding="utf-8-sig").casefold()
             for marker in banned:
