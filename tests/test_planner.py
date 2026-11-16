@@ -254,6 +254,23 @@ class GoalPlannerTests(unittest.TestCase):
                              {"direction": "forward", "seconds": 0.5})
             self.assertEqual(result["memory_reuse_count"], 1)
 
+    def test_outcome_summary_retains_active_goal_past_recent_history_window(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SkillOutcomeStore(Path(tmp) / "outcomes.db")
+            for index in range(250):
+                store.record("sim", "move_pulse", f"other-goal-{index:03d}", "FAILED",
+                             1, f"other-{index}")
+            store.record("sim", "move_pulse", "active-goal", "SUCCESS_VERIFIED", 1, "active",
+                         args={"direction": "forward", "seconds": 0.5},
+                         state_hash="0123456789abcdef")
+
+            summary = store.summary("sim", target="active-goal", state_hash="0123456789abcdef")
+
+            self.assertEqual(len(summary), 20)
+            self.assertEqual(summary[0]["target"], "active-goal")
+            self.assertEqual(summary[0]["verified_example"]["args"],
+                             {"direction": "forward", "seconds": 0.5})
+
     def test_latest_success_reenables_example_after_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = SkillOutcomeStore(Path(tmp) / "outcomes.db")

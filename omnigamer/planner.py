@@ -150,6 +150,8 @@ class SkillOutcomeStore:
                     conn.execute(f"ALTER TABLE skill_outcomes ADD COLUMN {name} {sql_type}")
             conn.execute("CREATE INDEX IF NOT EXISTS ix_skill_outcomes_state "
                          "ON skill_outcomes(game_id,state_hash)")
+            conn.execute("CREATE INDEX IF NOT EXISTS ix_skill_outcomes_target "
+                         "ON skill_outcomes(game_id,target,id)")
             conn.commit()
 
     @contextmanager
@@ -173,9 +175,19 @@ class SkillOutcomeStore:
 
     def summary(self, game_id, limit=200, max_groups=20, *, state_hash=None, target=None):
         with self._connection() as conn:
-            rows = conn.execute("SELECT skill,target,result,args_json,expected_result,success_check,state_hash "
-                                "FROM skill_outcomes WHERE game_id=? "
-                                "ORDER BY id DESC LIMIT ?", (game_id, limit)).fetchall()
+            columns = ("SELECT skill,target,result,args_json,expected_result,success_check,state_hash "
+                       "FROM skill_outcomes WHERE game_id=? ")
+            if target is None:
+                rows = conn.execute(columns + "ORDER BY id DESC LIMIT ?", (game_id, limit)).fetchall()
+            else:
+                # Keep retrieval bounded while preserving the active goal's
+                # history when unrelated outcomes push it past the global window.
+                rows = conn.execute(
+                    columns + "AND (id IN (SELECT id FROM skill_outcomes WHERE game_id=? "
+                    "ORDER BY id DESC LIMIT ?) OR id IN (SELECT id FROM skill_outcomes "
+                    "WHERE game_id=? AND target=? ORDER BY id DESC LIMIT ?)) ORDER BY id DESC",
+                    (game_id, game_id, limit, game_id, target, limit),
+                ).fetchall()
         grouped = {}
         state_examples = {}
         for skill, row_target, result, args_json, expected_result, success_check, example_state_hash in rows:
