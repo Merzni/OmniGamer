@@ -227,16 +227,19 @@ class GoalPlannerTests(unittest.TestCase):
     def test_outcome_summary_prioritizes_active_goal_over_newer_other_goals(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = SkillOutcomeStore(Path(tmp) / "outcomes.db")
+            frame = Image.new("RGB", (16, 16), (0, 0, 0))
+            state_hash = GameMemory.compute_state_hash(frame)
             for index in range(25):
                 store.record("sim", "move_pulse", f"goal-{index:02d}", "SUCCESS_VERIFIED",
-                             1, f"run-{index}", args={"direction": "forward", "seconds": 0.5})
+                             1, f"run-{index}", args={"direction": "forward", "seconds": 0.5},
+                             state_hash=state_hash)
 
             requests = []
             planner = GoalPlanner(self.registry,
                                   lambda **request: requests.append(request) or plan_for())
             executor = GoalExecutor(planner, self.registry, store, profile=self.profile, game_id="sim",
                                     execute_skill=lambda *_: self.fail("dry run executed"),
-                                    frame_provider=lambda: object(), stop_check=lambda: None,
+                                    frame_provider=lambda: frame, stop_check=lambda: None,
                                     dry_run=True)
             result = executor.run("goal-00")
 
