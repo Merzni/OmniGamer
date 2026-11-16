@@ -206,6 +206,8 @@ class TelemetryTests(unittest.TestCase):
                 "scope": "region_change", "duration_seconds": 0.5}}}},
             {"event": "skill_result", "result": {"evidence": {"verification": {
                 "scope": "interaction_outcome", "duration_seconds": 1.0}}}},
+            {"event": "skill_result", "result": {"evidence": {"verification": {
+                "scope": "plan_transition", "duration_seconds": 0.6}}}},
             {"event": "run_finish", "status": "SUCCESS", "reason": "plan_completed"},
         ]
         (run_dir / "goal_steps.jsonl").write_text(
@@ -226,6 +228,8 @@ class TelemetryTests(unittest.TestCase):
         self.assertIn("Проверки дельты региона: N=1; среднее 500.00 мс; медиана 500.00 мс; p95 500.00 мс",
                       result.stdout)
         self.assertIn("Проверки исхода взаимодействия: N=1; среднее 1000.00 мс; медиана 1000.00 мс; p95 1000.00 мс",
+                      result.stdout)
+        self.assertIn("Проверки перехода плана: N=1; среднее 600.00 мс; медиана 600.00 мс; p95 600.00 мс",
                       result.stdout)
 
 

@@ -408,6 +408,68 @@ class GoalPlannerTests(unittest.TestCase):
             self.assertEqual(a_example["args"]["direction"], "forward")
             self.assertEqual(b_example["args"]["direction"], "left")
 
+    def test_unverified_low_level_transition_blocks_next_planned_step(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            frame_a = Image.new("RGB", (16, 16), (0, 0, 0))
+            frame_b = Image.new("RGB", (16, 16), (255, 255, 255))
+            plan = {"steps": [
+                {"skill": "turn", "args": {"direction": "right", "amount": 20},
+                 "expected_result": "view turns right", "success_check": "landmark shifts right"},
+                {"skill": "move_pulse", "args": {"direction": "forward", "seconds": 0.5},
+                 "expected_result": "closer to tree", "success_check": "tree grows in frame"},
+            ]}
+            calls = []
+
+            class BlockedAssessment:
+                usable = True
+                result = "blocked"
+                confidence = 0.95
+                evidence = "The landmark did not shift"
+                evidence_source = "test_fixture"
+
+            runner = GoalExecutor(
+                GoalPlanner(self.registry, lambda **_: plan), self.registry,
+                SkillOutcomeStore(Path(tmp) / "outcomes.db"), profile=self.profile,
+                game_id="sim",
+                execute_skill=lambda spec, *_: calls.append(spec.name) or SkillResult(
+                    status=SkillStatus.SUCCESS, result_code="SUCCESS", reason="command sent"),
+                frame_provider=Mock(side_effect=[frame_a, frame_a, frame_b]),
+                stop_check=lambda: None, result_verifier=lambda *_: BlockedAssessment(),
+                max_replans=0)
+
+            result = runner.run("reach the tree")
+            self.assertEqual(result["status"], "FAILED")
+            self.assertEqual(calls, ["turn"])
+            self.assertIn("blocked", result["reason"])
+
+    def test_verified_low_level_transition_allows_next_planned_step(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            frame_a = Image.new("RGB", (16, 16), (0, 0, 0))
+            frame_b = Image.new("RGB", (16, 16), (255, 255, 255))
+            plan = {"steps": [
+                {"skill": "turn", "args": {"direction": "right", "amount": 20},
+                 "expected_result": "view turns right", "success_check": "landmark shifts right"},
+                {"skill": "move_pulse", "args": {"direction": "forward", "seconds": 0.5},
+                 "expected_result": "closer to tree", "success_check": "tree grows in frame"},
+            ]}
+            calls = []
+            logs = []
+            runner = GoalExecutor(
+                GoalPlanner(self.registry, lambda **_: plan), self.registry,
+                SkillOutcomeStore(Path(tmp) / "outcomes.db"), profile=self.profile,
+                game_id="sim",
+                execute_skill=lambda spec, *_: calls.append(spec.name) or SkillResult(
+                    status=SkillStatus.SUCCESS, result_code="SUCCESS", reason="command sent"),
+                frame_provider=Mock(side_effect=[frame_a, frame_a, frame_b, frame_b, frame_b]),
+                stop_check=lambda: None, result_verifier=confirm_goal, logger=logs.append)
+
+            result = runner.run("reach the tree")
+            scopes = [event["result"]["evidence"]["verification"]["scope"]
+                      for event in logs if event["event"] == "skill_result"]
+            self.assertEqual(result["status"], "SUCCESS")
+            self.assertEqual(calls, ["turn", "move_pulse"])
+            self.assertEqual(scopes, ["plan_transition", "goal_postcondition"])
+
     def test_dry_run_detector_uses_profile_synonyms(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.profile.detector_queries = {"tree_trunk": ["a tree trunk", "a tree"]}
@@ -689,7 +751,7 @@ class GoalPlannerTests(unittest.TestCase):
             runner = GoalExecutor(planner, self.registry, store, profile=self.profile, game_id="sim",
                 execute_skill=lambda *_: ran.append(1) or SkillResult(status=SkillStatus.SUCCESS,
                     result_code="SUCCESS", reason="ok"), frame_provider=lambda: object(), stop_check=lambda: None,
-                max_steps=1)
+                max_steps=1, result_verifier=confirm_goal)
             self.assertEqual(runner.run("goal")["reason"], "max_skill_steps")
             self.assertEqual(len(ran), 1)
 

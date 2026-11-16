@@ -374,15 +374,15 @@ class GoalExecutor:
             reused += (step.skill, signature) in verified_examples
         return len(verified_examples), reused
 
-    def _verify_result(self, step, result, before, after, timeout_seconds, *, force=False):
-        """Verify region-delta candidates and final goal postconditions."""
+    def _verify_result(self, step, result, before, after, timeout_seconds, *, force=False, scope=None):
+        """Verify interaction changes, intermediate transitions, and final postconditions."""
         result_code = result.get("result_code")
         needs_check = result_code in {
             "REGION_CHANGE_UNCONFIRMED", "SUCCESS_REGION_CHANGE",
             "INTERACTION_OUTCOME_UNCONFIRMED"}
         if not force and not needs_check:
             return result
-        verification_scope = ("goal_postcondition" if force else
+        verification_scope = scope or ("goal_postcondition" if force else
                               "interaction_outcome" if result_code == "INTERACTION_OUTCOME_UNCONFIRMED" else
                               "region_change")
         if force and result.get("status") != SkillStatus.SUCCESS.value:
@@ -396,7 +396,7 @@ class GoalExecutor:
             return {**result, "status": SkillStatus.UNCONFIRMED.value,
                     "result_code": "UNCONFIRMED", "reason": "goal_result_unverified",
                     "evidence": {**(result.get("evidence") or {}), "verification": {
-                        "scope": "goal_postcondition", "result": "unknown", "source": "no_verifier"}}}
+                        "scope": verification_scope, "result": "unknown", "source": "no_verifier"}}}
         evidence = dict(result.get("evidence") or {})
         if timeout_seconds <= 0:
             return {**result, "status": SkillStatus.UNCONFIRMED.value,
@@ -618,6 +618,17 @@ class GoalExecutor:
                         result = self._verify_result(step, result, verification_before,
                                                      verification_after, verification_budget,
                                                      force=verify_final)
+                    elif (not is_final_step and result.get("status") == SkillStatus.SUCCESS.value
+                          and result.get("result_code") not in OUTCOME_SUCCESS_CODES):
+                        # Low-level commands report that input was sent, not that the
+                        # predicted transition happened. Do not execute the next
+                        # preplanned step until its visible postcondition is confirmed.
+                        verification_after = self.frame_provider()
+                        verification_budget = self.profile.motion_limits.max_run_seconds - (
+                            self.clock() - started)
+                        result = self._verify_result(
+                            step, result, step_frame, verification_after, verification_budget,
+                            force=True, scope="plan_transition")
                 status = result.get("status", "FAILED")
                 duration = result.get("duration_seconds", max(0.0, self.clock() - begin))
                 if not self.dry_run:

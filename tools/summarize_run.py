@@ -203,19 +203,20 @@ def summarize(run_dir):
     if goal_events:
         plans = [row for row in goal_events if row.get("event") == "plan"]
         would_send = [row for row in goal_events if row.get("event") == "would_send"]
-        postcondition_checks = []
-        interaction_checks = []
-        result_checks = []
+        verification_checks = {
+            "goal_postcondition": [],
+            "plan_transition": [],
+            "interaction_outcome": [],
+            "region_change": [],
+        }
+        other_checks = []
         for row in goal_events:
             verification = ((row.get("result") or {}).get("evidence") or {}).get("verification") or {}
             duration = verification.get("duration_seconds")
             if _number(duration):
-                if verification.get("scope") == "goal_postcondition":
-                    postcondition_checks.append(duration * 1000)
-                elif verification.get("scope") == "interaction_outcome":
-                    interaction_checks.append(duration * 1000)
-                else:
-                    result_checks.append(duration * 1000)
+                scope = verification.get("scope") or "unknown"
+                destination = verification_checks.get(scope, other_checks)
+                destination.append(duration * 1000)
         goal_result = next((row for row in reversed(goal_events) if row.get("event") == "run_finish"), {})
         verified_examples = sum(row.get("verified_example_count", 0) for row in plans
                                 if _number(row.get("verified_example_count")))
@@ -227,9 +228,11 @@ def summarize(run_dir):
                       f"  Проверенных планов: {len(plans)}; перепланирований: {max(0, len(plans) - 1)}",
                       f"  would_send: {len(would_send)}",
                       f"  Доступно verified-примеров по планам: {verified_examples}; точных повторов args: {memory_reuse}",
-                      f"  Проверки постусловия цели: {_format_stats(postcondition_checks)}",
-                      f"  Проверки исхода взаимодействия: {_format_stats(interaction_checks)}",
-                      f"  Проверки дельты региона: {_format_stats(result_checks)}",
+                      f"  Проверки постусловия цели: {_format_stats(verification_checks['goal_postcondition'])}",
+                      f"  Проверки перехода плана: {_format_stats(verification_checks['plan_transition'])}",
+                      f"  Проверки исхода взаимодействия: {_format_stats(verification_checks['interaction_outcome'])}",
+                      f"  Проверки дельты региона: {_format_stats(verification_checks['region_change'])}",
+                      f"  Прочие проверки: {_format_stats(other_checks)}",
                       f"  Завершение: {goal_result.get('status', 'не записано')} — "
                       f"{goal_result.get('reason', 'не записана')}"])
     return "\n".join(lines)
