@@ -171,15 +171,15 @@ class SkillOutcomeStore:
                           state_hash))
             conn.commit()
 
-    def summary(self, game_id, limit=200, max_groups=20, *, state_hash=None):
+    def summary(self, game_id, limit=200, max_groups=20, *, state_hash=None, target=None):
         with self._connection() as conn:
             rows = conn.execute("SELECT skill,target,result,args_json,expected_result,success_check,state_hash "
                                 "FROM skill_outcomes WHERE game_id=? "
                                 "ORDER BY id DESC LIMIT ?", (game_id, limit)).fetchall()
         grouped = {}
         state_examples = {}
-        for skill, target, result, args_json, expected_result, success_check, example_state_hash in rows:
-            item = grouped.setdefault((skill, target), [0, 0, 0, None, False])
+        for skill, row_target, result, args_json, expected_result, success_check, example_state_hash in rows:
+            item = grouped.setdefault((skill, row_target), [0, 0, 0, None, False])
             item[1] += 1
             is_success = result in OUTCOME_SUCCESS_CODES
             item[0] += is_success
@@ -200,7 +200,7 @@ class SkillOutcomeStore:
                                "success_check": success_check or ""}
             elif (state_hash is not None and example_state_hash
                   and GameMemory._hash_distance(state_hash, example_state_hash) <= 4):
-                state_item = state_examples.setdefault((skill, target), [False, None])
+                state_item = state_examples.setdefault((skill, row_target), [False, None])
                 if state_item[0]:
                     continue
                 state_item[0] = True
@@ -216,11 +216,16 @@ class SkillOutcomeStore:
         # ``rows`` is newest-first, so the first time a group is inserted into
         # ``grouped`` is its latest outcome. Preserve that order when limiting
         # prompt context; alphabetical truncation can discard fresh recipes.
-        summaries = [{"skill": skill, "target": target, "successes": values[0], "attempts": values[1],
+        ordered_groups = list(grouped.items())
+        if target is not None:
+            # Keep recipes for the active goal ahead of unrelated recent goals.
+            # Python's stable sort preserves newest-first order within each tier.
+            ordered_groups.sort(key=lambda entry: entry[0][1] != target)
+        summaries = [{"skill": skill, "target": group_target, "successes": values[0], "attempts": values[1],
                       "uncertain": values[2], "success_rate": round(values[0] / values[1], 3),
-                      "verified_example": (state_examples.get((skill, target), [False, None])[1]
+                      "verified_example": (state_examples.get((skill, group_target), [False, None])[1]
                                            if state_hash is not None else values[3])}
-                     for (skill, target), values in grouped.items()]
+                     for (skill, group_target), values in ordered_groups]
         return summaries[:max(1, int(max_groups))]
 
 
@@ -522,7 +527,7 @@ class GoalExecutor:
             frame = self.frame_provider()
             state_hash = (GameMemory.compute_state_hash(frame)
                           if hasattr(frame, "convert") else None)
-            outcome_summary = self.store.summary(self.game_id, state_hash=state_hash)
+            outcome_summary = self.store.summary(self.game_id, state_hash=state_hash, target=goal)
             try:
                 plan = self.planner.plan(frame=frame, goal=goal, profile=self.profile,
                                          outcome_summary=outcome_summary, failure=failure,
