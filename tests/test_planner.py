@@ -375,6 +375,39 @@ class GoalPlannerTests(unittest.TestCase):
             self.assertEqual(other_plan["memory_reuse_count"], 0)
             self.assertEqual(other_result["memory_reuse_count"], 0)
 
+    def test_each_plan_step_memory_uses_its_own_pre_action_screen(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            frame_a = Image.new("RGB", (16, 16), (0, 0, 0))
+            frame_b = Image.new("RGB", (16, 16), (0, 0, 0))
+            for x in range(8, 16):
+                for y in range(16):
+                    frame_a.putpixel((x, y), (255, 255, 255))
+            for x in range(8):
+                for y in range(16):
+                    frame_b.putpixel((x, y), (255, 255, 255))
+            state_a = GameMemory.compute_state_hash(frame_a)
+            state_b = GameMemory.compute_state_hash(frame_b)
+            plan = {"steps": [
+                {"skill": "move_pulse", "args": {"direction": "forward", "seconds": 0.5},
+                 "expected_result": "move", "success_check": "result status"},
+                {"skill": "move_pulse", "args": {"direction": "left", "seconds": 0.5},
+                 "expected_result": "move", "success_check": "result status"},
+            ]}
+            store = SkillOutcomeStore(Path(tmp) / "outcomes.db")
+            runner = GoalExecutor(
+                GoalPlanner(self.registry, lambda **_: plan), self.registry, store,
+                profile=self.profile, game_id="sim",
+                execute_skill=lambda *_: SkillResult(status=SkillStatus.SUCCESS,
+                    result_code="SUCCESS_VERIFIED", reason="verified"),
+                frame_provider=Mock(side_effect=[frame_a, frame_a, frame_b, frame_b]),
+                stop_check=lambda: None, result_verifier=confirm_goal)
+
+            self.assertEqual(runner.run("move")["status"], "SUCCESS")
+            a_example = store.summary("sim", state_hash=state_a)[0]["verified_example"]
+            b_example = store.summary("sim", state_hash=state_b)[0]["verified_example"]
+            self.assertEqual(a_example["args"]["direction"], "forward")
+            self.assertEqual(b_example["args"]["direction"], "left")
+
     def test_dry_run_detector_uses_profile_synonyms(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.profile.detector_queries = {"tree_trunk": ["a tree trunk", "a tree"]}

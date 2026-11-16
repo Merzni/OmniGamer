@@ -453,10 +453,10 @@ class GoalExecutor:
             self.logger({"event": "run_finish", **result})
         return result
 
-    def _recover_blocked_approach(self, goal, target_text, started, steps_used, state_hash=None):
+    def _recover_blocked_approach(self, goal, target_text, started, steps_used):
         """Try one bounded camera sweep and a fresh approach before a slow VLM replan."""
         if self.dry_run:
-            return None, 0, None
+            return None, 0, None, None
         turn_amount = min(60, self.profile.motion_limits.max_turn_counts)
         recovery = (
             ("turn", {"direction": "right", "amount": turn_amount}),
@@ -466,20 +466,22 @@ class GoalExecutor:
         used = 0
         last_result = None
         last_skill = None
+        last_state_hash = None
         for name, args in recovery:
             self.stop_check()
             if self.input_action_budget is not None and self.input_action_budget.exhausted:
                 return {"status": "FAILED", "result_code": "FAILED", "reason": "max_actions",
-                        "evidence": {"recovery": "approach"}}, used, last_skill
+                        "evidence": {"recovery": "approach"}}, used, last_skill, last_state_hash
             if steps_used + used >= self.max_steps:
                 return {"status": "FAILED", "result_code": "FAILED", "reason": "max_skill_steps",
-                        "evidence": {"recovery": "approach"}}, used, last_skill
+                        "evidence": {"recovery": "approach"}}, used, last_skill, last_state_hash
             remaining = self.profile.motion_limits.max_run_seconds - (self.clock() - started)
             spec = self.registry.get(name)
             available = min(remaining, float(spec.timeout_seconds))
             if available <= 0:
                 return {"status": "FAILED", "result_code": "FAILED", "reason": "max_run_seconds",
-                        "evidence": {"recovery": "approach"}}, used, last_skill
+                        "evidence": {"recovery": "approach"}}, used, last_skill, last_state_hash
+            last_state_hash = self._current_state_hash()
             params = spec.validate_args(args).model_dump(mode="json")
             begin = self.clock()
             last_skill = name
@@ -489,14 +491,18 @@ class GoalExecutor:
             if name != "approach_target":
                 self.store.record(self.game_id, name, goal,
                                   last_result.get("result_code") or last_result.get("status", "FAILED"),
-                                  duration, self.run_id, args=params, state_hash=state_hash)
+                                  duration, self.run_id, args=params, state_hash=last_state_hash)
             if self.logger:
                 self.logger({"event": "local_recovery_skill", "recovery": "approach",
                              "skill": name, "args": params, "result": last_result})
             used += 1
             if last_result.get("status") != SkillStatus.SUCCESS.value:
-                return last_result, used, last_skill
-        return last_result, used, last_skill
+                return last_result, used, last_skill, last_state_hash
+        return last_result, used, last_skill, last_state_hash
+
+    def _current_state_hash(self):
+        frame = self.frame_provider()
+        return GameMemory.compute_state_hash(frame) if hasattr(frame, "convert") else None
 
     def run(self, goal):
         started, steps_used, replans, failure = self.clock(), 0, 0, ""
@@ -550,6 +556,9 @@ class GoalExecutor:
                     return self._finish({"status": "FAILED", "reason": "max_run_seconds", "steps": steps_used})
                 spec = self.registry.get(step.skill)
                 begin = self.clock()
+                step_frame = self.frame_provider()
+                step_state_hash = (GameMemory.compute_state_hash(step_frame)
+                                   if hasattr(step_frame, "convert") else None)
                 remaining = max(0.0, self.profile.motion_limits.max_run_seconds - (begin - started))
                 available = min(remaining, float(spec.timeout_seconds))
                 params = spec.validate_args(step.args).model_dump(mode="json")
@@ -574,7 +583,7 @@ class GoalExecutor:
                                            if self.profile else [query])
                                 score_min = (self.profile.thresholds.get("detector_score_min")
                                              if self.profile else None)
-                                found = self.detector.detect(self.frame_provider(), queries,
+                                found = self.detector.detect(step_frame, queries,
                                                              score_min=score_min, max_boxes=10)
                                 raw_boxes = found.get("boxes", []) if found else []
                                 valid_boxes = (_valid_detection(found, self.profile)
@@ -593,7 +602,7 @@ class GoalExecutor:
                     if self.logger:
                         self.logger({"event": "would_send", **resolved})
                 else:
-                    verification_before = (self.frame_provider() if self.result_verifier and
+                    verification_before = (step_frame if self.result_verifier and
                                            (step.skill == "interact_until_change" or is_final_step)
                                            else None)
                     result = self.execute_skill(spec, params, available)
@@ -615,7 +624,7 @@ class GoalExecutor:
                     self.store.record(self.game_id, step.skill, goal,
                                       result.get("result_code") or status, duration, self.run_id,
                                       args=params, expected_result=step.expected_result,
-                                      success_check=step.success_check, state_hash=state_hash)
+                                      success_check=step.success_check, state_hash=step_state_hash)
                 if self.logger:
                     self.logger({"event": "skill_result", "skill": step.skill,
                                  "args": step.args, "result": result})
@@ -632,8 +641,9 @@ class GoalExecutor:
                     if (step.skill == "approach_target"
                             and result.get("reason") in {
                                 "blocked_after_side_step", "target_not_reacquired"}):
-                        recovered, recovery_steps, recovery_skill = self._recover_blocked_approach(
-                            goal, params["target_text"], started, steps_used, state_hash=state_hash)
+                        recovered, recovery_steps, recovery_skill, recovery_state_hash = (
+                            self._recover_blocked_approach(goal, params["target_text"], started,
+                                                           steps_used))
                         steps_used += recovery_steps
                         recovery_approach_ran = recovery_skill == "approach_target"
                         if recovered and recovered.get("status") == SkillStatus.SUCCESS.value:
@@ -654,7 +664,7 @@ class GoalExecutor:
                                         recovered.get("result_code") or recovered.get("status", "FAILED"),
                                         recovered.get("duration_seconds", 0.0), self.run_id,
                                         args=params, expected_result=step.expected_result,
-                                        success_check=step.success_check, state_hash=state_hash)
+                                        success_check=step.success_check, state_hash=recovery_state_hash)
                                 if self.logger:
                                     self.logger({"event": "goal_postcondition", "skill": step.skill,
                                                  "result": recovered})
@@ -673,7 +683,7 @@ class GoalExecutor:
                                         recovered.get("result_code") or recovered.get("status", "FAILED"),
                                         recovered.get("duration_seconds", 0.0), self.run_id,
                                         args=params, expected_result=step.expected_result,
-                                        success_check=step.success_check, state_hash=state_hash)
+                                        success_check=step.success_check, state_hash=recovery_state_hash)
                                 continue
                         elif recovered and recovery_approach_ran:
                             self.store.record(
@@ -681,7 +691,7 @@ class GoalExecutor:
                                 recovered.get("result_code") or recovered.get("status", "FAILED"),
                                 recovered.get("duration_seconds", 0.0), self.run_id,
                                 args=params, expected_result=step.expected_result,
-                                success_check=step.success_check, state_hash=state_hash)
+                                success_check=step.success_check, state_hash=recovery_state_hash)
                         if recovered:
                             result = recovered
                     failure = f"{step.skill}: {status}: {result.get('reason', '')}; expected={step.expected_result}; check={step.success_check}"
