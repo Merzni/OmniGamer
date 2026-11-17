@@ -344,20 +344,20 @@ def wait_for_condition(*, capture, profile, timeout, query=None, region=None,
             except InterruptedError as exc:
                 return _result(SkillStatus.ABORT, "ABORT", str(exc), last_evidence, started)
         frame = capture.grab_frame()
-        visible = None
+        condition_met = True
         if params.query:
             if detector is None:
                 return _result(SkillStatus.FAILED, "FAILED", "detector_unavailable", {}, started)
             boxes = _valid_detection(detector.detect(frame, queries_for_target(profile, params.query)), profile)
             visible = bool(boxes)
+            condition_met = condition_met and visible is params.present
             last_evidence["boxes"] = boxes
         if params.region:
             delta = region_delta(baseline, frame, profile.regions[params.region])
             changed = delta >= profile.thresholds.get("region_change", 0.08)
-            region_condition = changed if params.present else not changed
-            visible = region_condition if visible is None else visible and region_condition
+            condition_met = condition_met and changed is params.present
             last_evidence["region_delta"] = delta
-        condition_met = visible is params.present
+            last_evidence["region_changed"] = changed
         step += 1
         last_evidence.update(query=params.query, region=params.region, present=params.present,
                              condition_met=condition_met, action=None)

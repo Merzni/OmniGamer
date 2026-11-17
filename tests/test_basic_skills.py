@@ -165,6 +165,20 @@ class BasicSkillTests(unittest.TestCase):
         self.assertEqual(result.status, SkillStatus.SUCCESS)
         self.assertEqual(result.result_code, "CONDITION_MET")
 
+    def test_wait_for_condition_supports_absent_region_and_combined_absence(self):
+        frame = Image.new("RGB", (20, 20))
+        region_only = wait_for_condition(capture=FakeCapture([frame, frame]), profile=self.profile,
+                                         timeout=1, region="hotbar", present=False,
+                                         poll_seconds=0)
+        self.assertEqual(region_only.result_code, "CONDITION_MET")
+        self.assertFalse(region_only.evidence["region_changed"])
+
+        detector = FakeDetector([{"boxes": []}])
+        combined = wait_for_condition(capture=FakeCapture([frame, frame]), profile=self.profile,
+                                      timeout=1, query="target", region="hotbar", present=False,
+                                      detector=detector, poll_seconds=0)
+        self.assertEqual(combined.result_code, "CONDITION_MET")
+
     def test_registry_executor_creates_and_finishes_common_telemetry(self):
         with tempfile.TemporaryDirectory() as temp:
             class Telemetry:
