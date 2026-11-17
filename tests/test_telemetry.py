@@ -184,9 +184,10 @@ class TelemetryTests(unittest.TestCase):
                 "step": index,
                 "decision": {"action_type": action, "refusal_reason": "guard" if status == "refusal" else None,
                              "fallback_reason": "Timeout: offline" if index == 2 else None,
-                             "action_source": "vlm"},
+                             "action_source": "vlm", "vlm_http_requests": 1},
                 "outcome": {"status": status},
-                "loop": {"no_effect_streak": index, "camera_only_streak": index - 1},
+                "loop": {"no_effect_streak": index, "camera_only_streak": index - 1,
+                         "state_repeat": index == 3, "repeat_warning": False},
                 "timings_ms": {"capture": capture_ms, "memory_lookup": None, "vlm_decide": None,
                                "grounding": None, "input_send": None, "post_wait": None,
                                "result_eval": None, "memory_write": None, "total": total_ms},
@@ -208,7 +209,9 @@ class TelemetryTests(unittest.TestCase):
                 "scope": "interaction_outcome", "duration_seconds": 1.0}}}},
             {"event": "skill_result", "result": {"evidence": {"verification": {
                 "scope": "plan_transition", "duration_seconds": 0.6}}}},
-            {"event": "run_finish", "status": "SUCCESS", "reason": "plan_completed"},
+            {"event": "skill_result", "result": {"status": "SUCCESS", "result_code": "SUCCESS_VERIFIED"}},
+            {"event": "run_finish", "status": "SUCCESS", "reason": "plan_completed",
+             "input_actions_used": 7, "memory_reuse_count": 2},
         ]
         (run_dir / "goal_steps.jsonl").write_text(
             "".join(json.dumps(row) + "\n" for row in goal_events), encoding="utf-8")
@@ -231,6 +234,15 @@ class TelemetryTests(unittest.TestCase):
                       result.stdout)
         self.assertIn("Проверки перехода плана: N=1; среднее 600.00 мс; медиана 600.00 мс; p95 600.00 мс",
                       result.stdout)
+        self.assertIn("task_success_rate: 1/1 (100.0%)", result.stdout)
+        self.assertIn("skill_success_rate: 1/1 (100.0%)", result.stdout)
+        self.assertIn("time_to_success: 60.0 с (длительность всего прогона; прокси)", result.stdout)
+        self.assertIn("actions_per_success: 7", result.stdout)
+        self.assertIn("vlm_calls_per_success: 5 запросов (шаги: 4; планирование: 1; проверки goal не включены)",
+                      result.stdout)
+        self.assertIn("target_switch_count: нет данных (нет устойчивого ID цели)", result.stdout)
+        self.assertIn("repeated_failure_count: 1 шагов с state_repeat/repeat_warning", result.stdout)
+        self.assertIn("memory_reuse_count: 2", result.stdout)
 
 
 if __name__ == "__main__":

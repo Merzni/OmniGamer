@@ -117,6 +117,7 @@ def summarize(run_dir):
     fallback_steps = sum(bool((step.get("decision") or {}).get("fallback_reason")) for step in steps)
     skill_steps = _read_jsonl(run_dir / "skill_steps.jsonl")
     goal_events = _read_jsonl(run_dir / "goal_steps.jsonl")
+    goal_result = next((row for row in reversed(goal_events) if row.get("event") == "run_finish"), {})
     skill_outcomes = defaultdict(Counter)
     for row in skill_steps:
         if row.get("event") == "finish":
@@ -161,6 +162,52 @@ def summarize(run_dir):
                  else "Шагов с fallback: 0 (—)")
     lines.append(f"RAM процесса, пик/среднее: {_mb(max(ram) if ram else None)} / {_mb(statistics.mean(ram) if ram else None)}")
     lines.append(f"VRAM, пик/среднее: {_mb(max(vram) if vram else None)} / {_mb(statistics.mean(vram) if vram else None)}")
+    finished = bool(goal_result)
+    succeeded = finished and goal_result.get("status") == "SUCCESS"
+    verified_skill_finishes = [
+        row for row in goal_events if row.get("event") == "skill_result"
+        and (row.get("result") or {}).get("result_code") == "SUCCESS_VERIFIED"
+    ]
+    skill_finishes = [row for row in goal_events if row.get("event") == "skill_result"
+                      and (row.get("result") or {}).get("status")]
+    vlm_calls = sum(value for step in steps
+                    for value in [(step.get("decision") or {}).get("vlm_http_requests")]
+                    if _number(value))
+    planner_calls = sum(row.get("request_count", 0) for row in goal_events
+                        if row.get("event") == "plan" and _number(row.get("request_count")))
+    uncertain_count = sum((step.get("outcome") or {}).get("status") == "uncertain" for step in steps)
+    uncertain_count += sum((row.get("result") or {}).get("result_code") == "UNCONFIRMED"
+                           for row in goal_events if row.get("event") == "skill_result")
+    lost_count = sum(row.get("state") == "LOST" for row in skill_steps)
+    look_corrections = sum((row.get("action") or {}).get("type") == "look" for row in skill_steps)
+    recoveries = sum((row.get("action") or {}).get("type") == "jump_recovery" for row in skill_steps)
+    repeated_failures = sum(bool((step.get("loop") or {}).get("state_repeat")
+                                 or (step.get("loop") or {}).get("repeat_warning")) for step in steps)
+    if finished:
+        task_success = "1/1 (100.0%)" if succeeded else "0/1 (0.0%)"
+    else:
+        task_success = "нет завершённого goal-прогона"
+    lines.extend(["", "Метрики качества (только наблюдаемая телеметрия):",
+                  f"  task_success_rate: {task_success}",
+                  f"  skill_success_rate: {len(verified_skill_finishes)}/{len(skill_finishes)} "
+                  f"({100 * len(verified_skill_finishes) / len(skill_finishes):.1f}%)" if skill_finishes
+                  else "  skill_success_rate: нет завершённых проверяемых навыков",
+                  f"  time_to_success: {duration_s:.1f} с (длительность всего прогона; прокси)"
+                  if succeeded else "  time_to_success: нет подтверждённого успеха",
+                  f"  actions_per_success: {goal_result.get('input_actions_used')}"
+                  if succeeded and _number(goal_result.get("input_actions_used"))
+                  else "  actions_per_success: нет данных для подтверждённого успеха",
+                  f"  vlm_calls_per_success: {vlm_calls + planner_calls} запросов "
+                  f"(шаги: {vlm_calls}; планирование: {planner_calls}; проверки goal не включены)"
+                  if succeeded else "  vlm_calls_per_success: нет подтверждённого успеха",
+                  "  detector_calls_per_success: не измеряется как число вызовов; записаны только задержки отдельных наблюдений",
+                  "  target_switch_count: нет данных (нет устойчивого ID цели)",
+                  f"  target_lost_count: {lost_count} записей состояния LOST",
+                  f"  camera_correction_count: {look_corrections} действий look в журналах навыков",
+                  f"  recovery_attempt_count: {recoveries} действий jump_recovery",
+                  f"  repeated_failure_count: {repeated_failures} шагов с state_repeat/repeat_warning",
+                  f"  memory_reuse_count: {goal_result.get('memory_reuse_count', 'нет данных')}",
+                  f"  uncertain_outcome_count: {uncertain_count}"])
     lines.extend(["", "Пять самых долгих шагов:"])
     ranked = sorted(steps, key=lambda step: step.get("timings_ms", {}).get("total") or -1, reverse=True)[:5]
     for step in ranked:
@@ -217,7 +264,6 @@ def summarize(run_dir):
                 scope = verification.get("scope") or "unknown"
                 destination = verification_checks.get(scope, other_checks)
                 destination.append(duration * 1000)
-        goal_result = next((row for row in reversed(goal_events) if row.get("event") == "run_finish"), {})
         verified_examples = sum(row.get("verified_example_count", 0) for row in plans
                                 if _number(row.get("verified_example_count")))
         memory_reuse = goal_result.get("memory_reuse_count")
