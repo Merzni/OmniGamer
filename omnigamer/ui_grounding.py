@@ -3,12 +3,7 @@ import numpy as np
 from PIL import Image,ImageDraw
 
 
-def button_candidates(frame):
-    image=frame.convert("RGB").copy()
-    image.thumbnail((960,960))
-    a=np.asarray(image).astype(int)
-    mask=(a.max(2)-a.min(2)<18)&(a.mean(2)>18)
-    w,h=image.size
+def _scanline_rectangles(mask,w,h):
     tracks={};boxes=[]
     for y,row in enumerate(mask):
         row=np.convolve(row,np.ones(9),mode="same")>0
@@ -23,9 +18,87 @@ def button_candidates(frame):
             if 12<=y-top<=h*.16 and (z-x)/(y-top)>2.8:
                 boxes.append((x,top,z,y))
         tracks=current
+    return boxes
+
+
+def _border_rectangles(mask,w,h):
+    lines=[]
+    for y,row in enumerate(mask):
+        row=np.convolve(row,np.ones(5),mode="same")>0
+        edges=np.flatnonzero(np.diff(np.r_[False,row,False]))
+        for left,right in zip(edges[::2],edges[1::2]):
+            left,right=int(left),int(right)
+            if not .065*w<right-left<.85*w:
+                continue
+            line=next((item for item in reversed(lines)
+                       if y-item["last_y"]<=3 and abs(item["left"]-left)<=4
+                       and abs(item["right"]-right)<=4),None)
+            if line is None:
+                lines.append({"left":left,"right":right,"first_y":y,"last_y":y,"count":1})
+            else:
+                line["left"]+=left
+                line["right"]+=right
+                line["count"]+=1
+                line["last_y"]=y
+    normalized=[]
+    for line in lines:
+        normalized.append((round(line["left"]/line["count"]),
+                           round((line["first_y"]+line["last_y"])/2),
+                           round(line["right"]/line["count"])))
+    boxes=[]
+    for index,(left,top,right) in enumerate(normalized):
+        for x2,bottom,z2 in normalized[index+1:]:
+            height=bottom-top
+            if height>h*.16:
+                break
+            has_intermediate_border=any(top<line_y<bottom
+                and abs(line_x-left)<=4 and abs(line_z-right)<=4
+                for line_x,line_y,line_z in normalized)
+            if (12<=height and abs(left-x2)<=4 and abs(right-z2)<=4
+                    and (right-left)/height>2.8 and not has_intermediate_border):
+                boxes.append((round((left+x2)/2),top,round((right+z2)/2),bottom))
+    return boxes
+
+
+def button_candidates(frame):
+    image=frame.convert("RGB").copy()
+    image.thumbnail((960,960))
+    a=np.asarray(image).astype(int)
+    mask=(a.max(2)-a.min(2)<18)&(a.mean(2)>18)
+    w,h=image.size
+    fill_boxes=_scanline_rectangles(mask,w,h)
+    # Textured or shaded buttons can break the low-chroma fill into unstable
+    # spans. Their dark, aligned top/bottom borders provide a second visual cue.
+    dark=(a.max(2)-a.min(2)<25)&(a.mean(2)<25)
+    border_boxes=_border_rectangles(dark,w,h)
+    boxes=[]
+    for box in fill_boxes:
+        area=max(1,(box[2]-box[0])*(box[3]-box[1]))
+        overlaps_border=False
+        for border in border_boxes:
+            overlap=max(0,min(box[2],border[2])-max(box[0],border[0]))*max(
+                0,min(box[3],border[3])-max(box[1],border[1]))
+            border_area=max(1,(border[2]-border[0])*(border[3]-border[1]))
+            if overlap/min(area,border_area)>=.5:
+                overlaps_border=True
+                break
+        if not overlaps_border:
+            boxes.append(box)
+    boxes.extend(border_boxes)
     merged=[]
     for box in sorted(boxes,key=lambda b:(b[0],b[1])):
-        if merged and abs(box[0]-merged[-1][0])<=4 and abs(box[2]-merged[-1][2])<=4 and 0<=box[1]-merged[-1][3]<=8:
+        area=max(1,(box[2]-box[0])*(box[3]-box[1]))
+        duplicate=False
+        for prior in merged:
+            intersection=max(0,min(box[2],prior[2])-max(box[0],prior[0]))*max(
+                0,min(box[3],prior[3])-max(box[1],prior[1]))
+            prior_area=max(1,(prior[2]-prior[0])*(prior[3]-prior[1]))
+            if intersection/min(area,prior_area)>=.8:
+                duplicate=True
+                break
+        if duplicate:
+            continue
+        if merged and abs(box[0]-merged[-1][0])<=4 and abs(box[2]-merged[-1][2])<=4 and 0<=box[1]-merged[-1][3]<=3:
             old=merged.pop();box=(min(old[0],box[0]),old[1],max(old[2],box[2]),box[3])
         merged.append(box)
     # Candidate rectangles are proposals, never a declaration that a UI is present.
@@ -43,6 +116,27 @@ def labeled_frame(frame,boxes):
         draw.rectangle((x,y,x+24,y+15),fill="black")
         draw.text((x+2,y+1),str(index),fill="white")
     return image
+
+
+def stacked_main_menu_layout(boxes):
+    """Recognize a centered three-button menu with a two-button footer."""
+    large=[box for box in boxes if box[2]-box[0]>=300 and 35<=box[3]-box[1]<=100
+           and 350<=(box[0]+box[2])/2<=650 and 350<=(box[1]+box[3])/2<=700]
+    large.sort(key=lambda box:box[1])
+    stacked=False
+    for start in range(len(large)-2):
+        group=large[start:start+3]
+        if all(abs(a[0]-b[0])<=14 and abs(a[2]-b[2])<=14
+               and abs((a[0]+a[2])-(b[0]+b[2]))<=28
+               and 7<=b[1]-a[3]<=35 for a,b in zip(group,group[1:])):
+            stacked=True
+            break
+    bottom=[box for box in boxes if 150<=box[2]-box[0]<=240 and 35<=box[3]-box[1]<=100
+            and 700<=(box[1]+box[3])/2<=920]
+    bottom_row=(len(bottom)>=2 and max(box[1] for box in bottom)-min(box[1] for box in bottom)<=35
+                and min((box[0]+box[2])/2 for box in bottom)<500
+                and max((box[0]+box[2])/2 for box in bottom)>500)
+    return stacked and bottom_row
 
 
 def candidate_cards(frame,boxes):

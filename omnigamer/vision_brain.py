@@ -14,7 +14,8 @@ from PIL import Image
 from pydantic import BaseModel, Field, model_validator
 from .config import config
 from .perception import FrameFacts,VisualAssessment, hud_crop
-from .ui_grounding import button_candidates,labeled_frame,candidate_cards,world_selection_cues,first_world_row
+from .ui_grounding import (button_candidates,labeled_frame,candidate_cards,world_selection_cues,
+                           first_world_row,stacked_main_menu_layout)
 from .look import look_counts
 
 logger = logging.getLogger(__name__)
@@ -395,6 +396,11 @@ class VisionBrain:
             timeout=(self.timeout if timeout_seconds is None else max(0.05,min(self.timeout,timeout_seconds))))
         response.raise_for_status()
         target=Target.model_validate_json(response.json()["choices"][0]["message"]["content"])
+        if ("stacked_main_menu" in adapters and target.scene_type in {"menu","unknown"}
+                and stacked_main_menu_layout(boxes)):
+            target.scene_type="menu"
+            target.menu_id="main_menu"
+            target.menu_state="default"
         if target.menu_id != "world_select":
             # Selection state is only meaningful for this recognized list layout.
             target.menu_state = "default"

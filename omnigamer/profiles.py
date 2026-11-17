@@ -76,7 +76,7 @@ class GameProfile(BaseModel):
     forbidden_keys: list[str] = Field(default_factory=list)
     motion_limits: MotionLimits = Field(default_factory=MotionLimits)
     detector_queries: Dict[str, list[str]] = Field(default_factory=dict)
-    ui_adapters: list[Literal["world_selection"]] = Field(default_factory=list)
+    ui_adapters: list[Literal["world_selection", "stacked_main_menu"]] = Field(default_factory=list)
     mine_requires_grounded_level_view: bool | None = None
     mine_requires_target_at_crosshair: bool = False
     thresholds: Dict[str, float] = Field(default_factory=dict)

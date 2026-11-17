@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import Mock,patch
 from PIL import Image,ImageDraw
 from omnigamer.vision_brain import VisionBrain,BrainDecision
-from omnigamer.ui_grounding import button_candidates,world_selection_cues
+from omnigamer.ui_grounding import button_candidates,world_selection_cues,stacked_main_menu_layout
 from omnigamer.camera_feedback import camera_feedback
 from omnigamer.profiles import load_profile
 import numpy as np
@@ -47,6 +47,47 @@ class GroundingTests(unittest.TestCase):
         with patch('omnigamer.vision_brain.requests.post',return_value=response), \
              self.assertRaisesRegex(ValueError,'does not match returned bbox'):
             self.brain.ground_click(self.frame,BrainDecision(action_type='click',target_label='PLAY'))
+
+    def test_dark_outlines_recover_textured_menu_buttons(self):
+        rng=np.random.default_rng(5);w,h=960,526
+        pixels=np.empty((h,w,3),dtype=np.uint8);pixels[:]=[70,110,150]
+        texture=rng.integers(-28,29,(36,360,3))
+        pixels[213:249,325:685]=np.clip(130+texture,0,255)
+        frame=Image.fromarray(pixels)
+        ImageDraw.Draw(frame).rectangle((325,213,684,248),outline=(0,0,0),width=2)
+        boxes=button_candidates(frame)
+        target=next((box for box in boxes if 390<box[1]<420),None)
+        self.assertIsNotNone(target)
+        left,top,right,bottom=target
+        self.assertTrue(left<350<right and top<445<bottom)
+        self.assertLess(bottom-top,100)
+
+    def test_stacked_main_menu_geometry_confirms_unknown_vlm_scene(self):
+        rng=np.random.default_rng(17);w,h=960,526
+        pixels=np.empty((h,w,3),dtype=np.uint8);pixels[:]=[70,110,150]
+        for top in (213,256,299):
+            texture=rng.integers(-28,29,(36,360,3))
+            pixels[top:top+36,325:685]=np.clip(130+texture,0,255)
+        frame=Image.fromarray(pixels);draw=ImageDraw.Draw(frame)
+        for top in (213,256,299):draw.rectangle((325,top,684,top+35),outline=(0,0,0),width=2)
+        for box in ((325,385,504,420),(510,385,689,420)):
+            draw.rectangle(box,fill=(125,125,125),outline=(0,0,0),width=2)
+        boxes=button_candidates(frame)
+        self.assertTrue(stacked_main_menu_layout(boxes))
+        target=next(box for box in boxes if 390<box[1]<420)
+        response,_=self.target(scene_type='unknown',menu_id='unknown',candidate_id=boxes.index(target)+1,
+            bbox=target,label='Одиночная игра',expected_result='world_select')
+        with patch('omnigamer.vision_brain.requests.post',return_value=response):
+            result=self.brain.ground_click(frame,BrainDecision(action_type='click',
+                target_label='Одиночная игра',intent='Open world list'),
+                profile=load_profile('minecraft'))
+        self.assertEqual(result.scene_type,'menu')
+        self.assertEqual(result.menu_id,'main_menu')
+
+    def test_stacked_main_menu_geometry_rejects_incomplete_layout(self):
+        boxes=[[340,405,719,470],[340,487,719,551],[340,568,719,633],
+               [340,732,527,798]]
+        self.assertFalse(stacked_main_menu_layout(boxes))
 
     def test_unreadable_localized_label_is_never_clicked(self):
         response,_=self.target(label='\ufffd\ufffd\ufffd')
