@@ -169,6 +169,8 @@ Recovery мог сохранить успешный `search_target` с аргу�
 
 Окно `Minecraft* 26.3` обнаружено; `omnigamer.doctor --game-id minecraft --window "Minecraft* 26.3"` получил кадр 1692×848, подтвердил активный input desktop и отдельно сообщил, что `SendInput` не вызывался. Health/probe VLM на `127.0.0.1:8081` и detector на `127.0.0.1:8082` завершились timeout/connection refused. Поэтому inference, live-действия и игровые результаты не проверены. Второе игровое окно среди открытых не обнаружено. Проектный и Windows screenshot backend дали разные результаты: doctor получил кадр, а повторный read-only CUA capture окна завершился timeout.
 
+Рабочая `data/memory.db` открыта через SQLite URI `mode=ro`: `PRAGMA quick_check=ok`, в `skill_outcomes` 96 строк, в `experiences` 947. Строки не читались и база не изменялась.
+
 ## Возможности каталога навыков по профилю камеры (2026-11-17)
 
 Goal planner раньше предлагал `turn`, `search_target` и `approach_target` даже для `camera_type="none"`; первые и последний гарантированно отказываются, поиск требует camera sweep. Теперь эти навыки исключаются из каталога и дополнительно отклоняются при проверке входящего плана. Регрессия подтверждает фильтрацию, отказ неподдерживаемому плану и повтор с допустимым `move_pulse`. Тестовый профиль для сценариев с поворотами явно задан как `first_person`; отдельные camera-free проверки используют `camera_type="none"`. Полный набор: 272 unittest прошли; pyflakes без замечаний. Проверка в живом профиле не проводилась.
