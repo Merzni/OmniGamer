@@ -20,6 +20,22 @@ OUTCOME_SUCCESS_CODES = frozenset({
 })
 
 
+def _verified_example(args_json, expected_result, success_check):
+    """Return only recipe data that satisfies the planner's visible-check contract."""
+    if (not isinstance(expected_result, str) or not expected_result.strip()
+            or len(expected_result) > 300 or not isinstance(success_check, str)
+            or not success_check.strip() or len(success_check) > 300):
+        return None
+    try:
+        args = json.loads(args_json)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(args, dict):
+        return None
+    return {"args": args, "expected_result": expected_result,
+            "success_check": success_check}
+
+
 class PlannedStep(BaseModel):
     model_config = ConfigDict(extra="forbid")
     skill: str = Field(min_length=1, max_length=80)
@@ -203,13 +219,7 @@ class SkillOutcomeStore:
                 item[4] = True
                 if result not in OUTCOME_SUCCESS_CODES or not args_json:
                     continue
-                try:
-                    args = json.loads(args_json)
-                except (TypeError, ValueError):
-                    args = None
-                if isinstance(args, dict):
-                    item[3] = {"args": args, "expected_result": expected_result or "",
-                               "success_check": success_check or ""}
+                item[3] = _verified_example(args_json, expected_result, success_check)
             elif (state_hash is not None and example_state_hash
                   and GameMemory._hash_distance(state_hash, example_state_hash) <= 4):
                 state_item = state_examples.setdefault((skill, row_target), [False, None])
@@ -218,13 +228,7 @@ class SkillOutcomeStore:
                 state_item[0] = True
                 if result not in OUTCOME_SUCCESS_CODES or not args_json:
                     continue
-                try:
-                    args = json.loads(args_json)
-                except (TypeError, ValueError):
-                    args = None
-                if isinstance(args, dict):
-                    state_item[1] = {"args": args, "expected_result": expected_result or "",
-                                     "success_check": success_check or ""}
+                state_item[1] = _verified_example(args_json, expected_result, success_check)
         # ``rows`` is newest-first, so the first time a group is inserted into
         # ``grouped`` is its latest outcome. Preserve that order when limiting
         # prompt context; alphabetical truncation can discard fresh recipes.

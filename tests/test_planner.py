@@ -232,6 +232,7 @@ class GoalPlannerTests(unittest.TestCase):
             for index in range(25):
                 store.record("sim", "move_pulse", f"goal-{index:02d}", "SUCCESS_VERIFIED",
                              1, f"run-{index}", args={"direction": "forward", "seconds": 0.5},
+                             expected_result="closer to goal", success_check="visible distance decreased",
                              state_hash=state_hash)
 
             requests = []
@@ -262,6 +263,7 @@ class GoalPlannerTests(unittest.TestCase):
                              1, f"other-{index}")
             store.record("sim", "move_pulse", "active-goal", "SUCCESS_VERIFIED", 1, "active",
                          args={"direction": "forward", "seconds": 0.5},
+                         expected_result="closer to goal", success_check="visible distance decreased",
                          state_hash="0123456789abcdef")
 
             summary = store.summary("sim", target="active-goal", state_hash="0123456789abcdef")
@@ -301,9 +303,11 @@ class GoalPlannerTests(unittest.TestCase):
             state_b = GameMemory.compute_state_hash(right_to_left)
             self.assertGreater(GameMemory._hash_distance(state_a, state_b), 4)
             store.record("sim", "move_pulse", "move", "SUCCESS_VERIFIED", 1, "a",
-                         args={"direction": "forward", "seconds": 0.5}, state_hash=state_a)
+                         args={"direction": "forward", "seconds": 0.5},
+                         expected_result="closer", success_check="target is closer", state_hash=state_a)
             store.record("sim", "move_pulse", "move", "SUCCESS_VERIFIED", 1, "b",
-                         args={"direction": "left", "seconds": 0.5}, state_hash=state_b)
+                         args={"direction": "left", "seconds": 0.5},
+                         expected_result="turned", success_check="view changed", state_hash=state_b)
             self.assertEqual(store.summary("sim", state_hash=state_a)[0]["verified_example"]["args"],
                              {"direction": "forward", "seconds": 0.5})
             self.assertIsNone(store.summary("sim", state_hash="ffffffffffffffff")[0]["verified_example"])
@@ -312,6 +316,24 @@ class GoalPlannerTests(unittest.TestCase):
             store.record("sim", "move_pulse", "move", "FAILED", 1, "a-failed",
                          args={"direction": "forward", "seconds": 0.5}, state_hash=nearby_state_a)
             self.assertIsNone(store.summary("sim", state_hash=state_a)[0]["verified_example"])
+
+    def test_outcome_summary_requires_visible_check_for_verified_examples(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = SkillOutcomeStore(Path(temp) / "outcomes.db")
+            state_hash = "0123456789abcdef"
+            store.record("sim", "search_target", "find target", "TARGET_DETECTED", 0.2, "recovery",
+                         args={"target_text": "target"}, state_hash=state_hash)
+
+            self.assertEqual(store.summary("sim")[0]["successes"], 1)
+            self.assertIsNone(store.summary("sim")[0]["verified_example"])
+            self.assertIsNone(store.summary("sim", state_hash=state_hash)[0]["verified_example"])
+
+            store.record("sim", "search_target", "find target", "TARGET_DETECTED", 0.2, "checked",
+                         args={"target_text": "target"}, expected_result="target is visible",
+                         success_check="detector returns a matching target", state_hash=state_hash)
+            example = store.summary("sim", state_hash=state_hash)[0]["verified_example"]
+            self.assertEqual(example["expected_result"], "target is visible")
+            self.assertEqual(example["success_check"], "detector returns a matching target")
 
     def test_skill_outcome_store_additively_migrates_legacy_schema(self):
         with tempfile.TemporaryDirectory() as temp:
