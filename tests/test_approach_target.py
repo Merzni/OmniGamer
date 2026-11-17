@@ -321,6 +321,19 @@ class ApproachTargetTests(unittest.TestCase):
         self.assertTrue(all(call[2] == 0.2 for call in cautious))
         self.assertTrue(any(row["state"] == "CLOSE_TARGET_HELD" for row in rows))
 
+    def test_close_target_heuristic_uses_profile_reach_height(self):
+        profile = GameProfile(game_id="height-threshold",
+                              thresholds={"approach_reach_height": 0.8})
+        settings = ApproachTargetSettings.from_profile(profile)
+        skill, _, _ = self.make_skill([[]], settings=settings, profile=profile)
+
+        below_threshold = {"x1": 0.4, "x2": 0.6, "y1": 0.1, "y2": 0.7}
+        above_threshold = {"x1": 0.4, "x2": 0.6, "y1": 0.1, "y2": 0.91}
+
+        self.assertEqual(settings.reach_height, 0.8)
+        self.assertFalse(skill._close_and_centered(below_threshold))
+        self.assertTrue(skill._close_and_centered(above_threshold))
+
     def test_look_retry_rechecks_without_counting_a_miss(self):
         class RetryDetector(FakeDetector):
             pass

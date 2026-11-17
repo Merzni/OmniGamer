@@ -352,7 +352,8 @@ class ApproachTargetSkill:
         if not box:
             return False
         height, center_error, _ = box_metrics(box)
-        return (height > 0.5 or float(box.get("y1", 1.0)) <= self.settings.reach_top_y) \
+        return (height > self.settings.reach_height
+                or float(box.get("y1", 1.0)) <= self.settings.reach_top_y) \
             and abs(center_error) <= self.settings.reach_center_x
 
     def _reach_geometry(self, box):
