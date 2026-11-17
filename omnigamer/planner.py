@@ -261,6 +261,8 @@ class GoalPlanner:
         if profile.camera_type == "none":
             catalog = [skill for skill in catalog
                        if skill["name"] not in CAMERA_DEPENDENT_SKILLS]
+        if not profile.actions or not profile.regions:
+            catalog = [skill for skill in catalog if skill["name"] != "interact_until_change"]
         for skill in catalog:
             properties = skill.get("parameters", {}).get("properties", {})
             if skill["name"] == "interact_until_change":
@@ -284,6 +286,9 @@ class GoalPlanner:
             params = spec.validate_args(step.args)
             values = params.model_dump()
             if profile and step.skill == "interact_until_change":
+                if not profile.actions or not profile.regions:
+                    raise ValueError(f"Skill 'interact_until_change' requires configured actions and regions "
+                                     f"in profile {profile.game_id!r}")
                 if values["action"] not in profile.actions:
                     raise ValueError(f"Action {values['action']!r} is not configured in profile {profile.game_id!r}")
                 if values["region"] not in profile.regions:

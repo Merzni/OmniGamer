@@ -219,6 +219,25 @@ class GoalPlannerTests(unittest.TestCase):
                                              "expected_result": "changed",
                                              "success_check": "visible change"}]}, profile)
 
+    def test_interaction_skill_requires_profile_action_and_region(self):
+        planner = GoalPlanner(self.registry, lambda **_: plan_for())
+        step = {"steps": [{"skill": "interact_until_change",
+                            "args": {"region": "area", "action": "activate", "max_repeats": 1},
+                            "expected_result": "screen changes", "success_check": "target disappears"}]}
+        profiles = (
+            GameProfile(game_id="no-interaction", camera_type="none"),
+            GameProfile(game_id="missing-region", camera_type="none",
+                        actions={"activate": {"kind": "key", "value": "e"}}),
+            GameProfile(game_id="missing-action", camera_type="none",
+                        regions={"area": {"x1": 0, "y1": 0, "x2": 1, "y2": 1}}),
+        )
+        for profile in profiles:
+            with self.subTest(game_id=profile.game_id):
+                offered = {skill["name"] for skill in planner._profile_catalog(profile)}
+                self.assertNotIn("interact_until_change", offered)
+                with self.assertRaisesRegex(ValueError, "requires configured actions and regions"):
+                    planner.validate(step, profile)
+
     def test_outcome_store_separates_games_and_summarizes_success_rate(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = SkillOutcomeStore(Path(tmp) / "outcomes.db")
