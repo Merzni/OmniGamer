@@ -227,6 +227,22 @@ class AgentMemoryTests(unittest.TestCase):
         agent.set_input_backend("native")
         self.assertEqual(agent.profile.input_backend, "native")
 
+    def test_window_backend_turn_proposal_waits_without_raising_or_learning(self):
+        self.VisionBrain.return_value.decide.return_value = BrainDecision(
+            action_type="look", look_direction="left", look_amount="small")
+        agent = self.create(input_backend="window")
+
+        result = agent.step()
+
+        self.assertEqual(result["decision"]["action_type"], "wait")
+        self.assertEqual(agent.last_guard_reason, "input_backend_has_no_relative_camera")
+        self.assertEqual(agent.last_action_source, "camera_guard")
+        self.WindowInputController.return_value.move_camera.assert_not_called()
+        experience = agent.memory.get_recent_experiences(agent.game_id)[-1]
+        self.assertEqual(experience["action_type"], "wait")
+        self.assertFalse(experience["learnable"])
+        self.assertFalse(experience["effective"])
+
     def test_experience_reaches_brain_after_restart_and_replans(self):
         click = BrainDecision(action_type="click", x=500, y=700, observation="menu")
         other = BrainDecision(action_type="click", x=200, y=300, observation="menu")
@@ -625,7 +641,8 @@ class AgentMemoryTests(unittest.TestCase):
         self.WindowCapture.return_value.focus.assert_not_called()
         self.WindowCapture.return_value.assert_foreground.assert_not_called()
         self.assertGreaterEqual(self.WindowCapture.return_value.assert_visible.call_count,3)
-        controller.return_value.move_camera.assert_called_once()
+        self.assertEqual(agent.last_decision.action_type, "wait")
+        controller.return_value.move_camera.assert_not_called()
 
     def test_unknown_menu_click_still_triggers_menu_verifier(self):
         self.VisionBrain.return_value.decide.return_value=BrainDecision(action_type="click",x=500,y=500)

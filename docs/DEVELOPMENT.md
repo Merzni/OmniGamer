@@ -140,7 +140,7 @@ print(f'Python syntax OK: {len(files)} files')
 
 ## Отдельный ввод и память меню (2026-11-14)
 
-По умолчанию `input_backend=native`: общий SendInput и фокус окна. `window` использует HWND PostMessage без системной мыши и focus; `look` в нём явно отклоняется. CLI принимает `--input-backend window|native`; панель имеет явный переключатель `/api/input-backend`. Настройка действует до рестарта, стартовое значение берётся из config. Для Raw Input/полноценной 3D-изоляции нужна отдельная сессия/VM. Захват требует видимой игры; native использует общую мышь. Подробный контракт: [POINTER_AND_MENU_MEMORY.md](POINTER_AND_MENU_MEMORY.md).
+По умолчанию `input_backend=native`: общий SendInput и фокус окна. `window` использует HWND PostMessage без системной мыши и focus; legacy `look` в нём переводится в `wait` до исполнения и записывается как незаучиваемый исход. CLI принимает `--input-backend window|native`; панель имеет явный переключатель `/api/input-backend`. Настройка действует до рестарта, стартовое значение берётся из config. Для Raw Input/полноценной 3D-изоляции нужна отдельная сессия/VM. Захват требует видимой игры; native использует общую мышь. Подробный контракт: [POINTER_AND_MENU_MEMORY.md](POINTER_AND_MENU_MEMORY.md).
 
 Планировщик учитывает фактический runtime input backend: при `window` скрывает и отклоняет `turn`, `search_target` и `approach_target`, поскольку адресованный HWND-ввод не поддерживает относительную 3D-камеру. CLI-переопределение и переключение backend в панели синхронизируются с объектом профиля до планирования.
 

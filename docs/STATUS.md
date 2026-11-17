@@ -222,3 +222,9 @@ Goal planner раньше предлагал `turn`, `search_target` и `approac
 ## Runtime backend учитывается при выборе camera-навыков (2026-11-18)
 
 `window` backend намеренно отклоняет `move_camera`, но goal planner учитывал только `camera_type` и мог предлагать `turn`, `search_target` или `approach_target` профилю first-person. При CLI override planner также видел старое значение backend из профиля. Теперь `OmniAgent` синхронизирует фактический backend с объектом профиля при создании и runtime-переключении; planner скрывает и отклоняет camera-dependent навыки для `window`. Прямой `approach_target` возвращает `UNCERTAIN/input_backend_has_no_relative_camera` до захвата кадра/ввода. Целевые тесты покрывают профильный фильтр, runtime override и ранний отказ skill. Полный набор: 296 unittest; pyflakes без замечаний. Живой ввод не выполнялся.
+
+В последующем read-only doctor локальные сервисы ответили 200: VLM прошла JSON Schema probe, detector на CUDA/FP16 вернул 2 рамки для кадра Minecraft 1600×877. Доступ к input desktop снова отказан с WinError 5; `SendInput` не вызывался. Один live `--goal --dry-run` выбрал `click_menu_target` / «Одиночная игра», выполнил 1 плановый шаг без игрового ввода (0/60). Это проверяет планирование на текущем кадре, не фактический переход.
+
+## Legacy-поворот камеры при оконном backend (2026-11-18)
+
+В legacy `OmniAgent.step()` свободное предложение VLM `look` ранее доходило до `WindowInputController.move_camera()`, который намеренно отказывает для `window`; исключение могло остановить `run_loop`. Теперь такое предложение преобразуется до исполнения в короткий `wait` с явной причиной `input_backend_has_no_relative_camera`. Запись ожидания исключена из обучаемого и эффективного опыта. Регрессия проверяет отсутствие вызова camera-ввода и маркировку опыта; полный набор: 297 unittest, pyflakes без замечаний. Изменение подтверждено синтетически, живой ввод не выполнялся.

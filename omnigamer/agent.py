@@ -592,11 +592,17 @@ class OmniAgent:
             })
             self.last_action_source = "strategy_recovery"
         profile_camera_reason = ""
-        if self.profile and self.profile.camera_type == "none" and decision.action_type == "look":
+        if decision.action_type == "look" and self.profile and self.profile.camera_type == "none":
             decision = decision.model_copy(update={"action_type": "wait", "duration": 0.2,
                 "intent": "Wait because this profile has no camera", "look_direction": None,
                 "look_amount": None, "x": None, "y": None})
             profile_camera_reason = "profile_has_no_camera"
+        elif decision.action_type == "look" and self.input_backend == "window":
+            decision = decision.model_copy(update={"action_type": "wait", "duration": 0.2,
+                "intent": "Wait because this input backend has no relative camera control",
+                "commentary": "Поворот камеры здесь недоступен. Выберу другой ход.",
+                "look_direction": None, "look_amount": None, "x": None, "y": None})
+            profile_camera_reason = "input_backend_has_no_relative_camera"
         filtered, guard_reason = self.camera_guard.filter(
             decision.model_dump(), facts=facts,
             grounded_confident=grounded_confident,
