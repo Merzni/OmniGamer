@@ -363,6 +363,9 @@ class GoalPlanner:
                 request_started = time.monotonic()
                 try:
                     raw = self.request_plan(**request)
+                except Exception as exc:
+                    detail = f"{type(exc).__name__}: {exc}"[:300]
+                    raise PlanningError(f"Goal planner request failed: {detail}") from exc
                 finally:
                     request_durations.append(max(0.0, time.monotonic() - request_started))
                 try:
@@ -584,7 +587,7 @@ class GoalExecutor:
                     self.logger({"event": "plan_rejected", "reason": str(exc),
                                  **self.planner.last_plan_metrics})
                 return self._finish({"status": "FAILED",
-                                     "reason": f"planner_validation_failed{prior_failure}: {exc}",
+                                     "reason": f"planner_failed{prior_failure}: {exc}",
                                      "steps": steps_used})
             verified_example_count, memory_reuse_count = self._memory_reuse_metrics(
                 goal, outcome_summary, plan)

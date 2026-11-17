@@ -884,12 +884,19 @@ class GoalPlannerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             store = SkillOutcomeStore(Path(tmp) / "outcomes.db")
             calls = []
+            logs = []
             unavailable = GoalPlanner(self.registry, lambda **_: (_ for _ in ()).throw(TimeoutError("offline")))
             runner = GoalExecutor(unavailable, self.registry, store, profile=self.profile, game_id="sim",
-                execute_skill=lambda *_: calls.append("input"), frame_provider=lambda: object(), stop_check=lambda: None)
-            with self.assertRaises(TimeoutError):
-                runner.run("goal")
+                execute_skill=lambda *_: calls.append("input"), frame_provider=lambda: object(),
+                stop_check=lambda: None, logger=logs.append)
+            result = runner.run("goal")
+            self.assertEqual(result["status"], "FAILED")
+            self.assertIn("planner_failed: Goal planner request failed: TimeoutError: offline",
+                          result["reason"])
             self.assertEqual(calls, [])
+            self.assertEqual(logs[0]["event"], "plan_rejected")
+            self.assertEqual(len(logs[0]["request_durations_seconds"]), 1)
+            self.assertGreaterEqual(logs[0]["request_durations_seconds"][0], 0)
 
             two_steps = {"steps": [plan_for()["steps"][0], plan_for()["steps"][0]]}
             planner = GoalPlanner(self.registry, lambda **_: two_steps)
