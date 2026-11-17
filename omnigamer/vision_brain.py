@@ -401,8 +401,14 @@ class VisionBrain:
             else:target.menu_state="unknown_selection"
             if play is False and target.candidate_id and 220<(boxes[target.candidate_id-1][0]+boxes[target.candidate_id-1][2])/2<480:
                 raise ValueError("Play is visibly disabled; select a world row first")
-        if target.scene_type!="menu" or not target.enabled or target.confidence<.85 or not target.label.strip():
-            raise ValueError("Menu target is missing, disabled or not confidently localized")
+        if target.scene_type!="menu":
+            raise ValueError(f"Menu target scene is not verified ({target.scene_type})")
+        if not target.enabled:
+            raise ValueError("Menu target is disabled")
+        if target.confidence<.85:
+            raise ValueError(f"Menu target confidence {target.confidence:.2f} is below 0.85")
+        if not target.label.strip():
+            raise ValueError("Menu target label is empty")
         if "\ufffd" in target.label:
             raise ValueError("Menu target label is unreadable")
         bbox=target.bbox

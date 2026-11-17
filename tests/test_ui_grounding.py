@@ -54,6 +54,12 @@ class GroundingTests(unittest.TestCase):
              self.assertRaisesRegex(ValueError,'label is unreadable'):
             self.brain.ground_click(self.frame,BrainDecision(action_type='click',target_label='PLAY'))
 
+    def test_localizer_rejection_reports_the_confidence_gate(self):
+        response,_=self.target(confidence=.84)
+        with patch('omnigamer.vision_brain.requests.post',return_value=response), \
+             self.assertRaisesRegex(ValueError,'confidence 0.84 is below 0.85'):
+            self.brain.ground_click(self.frame,BrainDecision(action_type='click',target_label='PLAY'))
+
     def test_missing_schema_fields_and_truncated_action_do_not_execute(self):
         with tempfile.TemporaryDirectory() as td:
             self.brain.log_file=Path(td)/'raw.log'
