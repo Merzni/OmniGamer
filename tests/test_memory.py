@@ -184,12 +184,14 @@ class AgentMemoryTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name) / "memory.db"
         self.frame = Image.new("RGB", (100, 100), "black")
-        for name in ("WindowCapture", "HumanInputController", "VisionBrain", "StreamerPersona"):
+        for name in ("WindowCapture", "HumanInputController", "WindowInputController",
+                     "VisionBrain", "StreamerPersona"):
             patcher = patch.object(agent_module, name)
             setattr(self, name, patcher.start())
             self.addCleanup(patcher.stop)
         self.WindowCapture.return_value.get_window_title.return_value = "Minecraft 1.21"
         self.WindowCapture.return_value.assert_foreground = Mock()
+        self.WindowCapture.return_value.assert_visible = Mock()
         self.WindowCapture.return_value.grab_frame.return_value = self.frame
         self.WindowCapture.return_value.norm_to_screen.return_value = (50, 70)
         self.WindowCapture.return_value.last_rect = (0, 0, 100, 100)
@@ -206,16 +208,24 @@ class AgentMemoryTests(unittest.TestCase):
         agent_module.config.desktop_bot_pointer=False
 
     def create(self, game_id="survival", mine_requires_target_at_crosshair=False,
-               mine_requires_grounded_level_view=True, camera_type="first_person"):
+               mine_requires_grounded_level_view=True, camera_type="first_person",
+               input_backend="native"):
         profile = GameProfile(game_id=game_id, camera_type=camera_type,
             actions={"primary_hold": InputAction(kind="mouse", value="left", duration=3),
                      "interact": InputAction(kind="mouse", value="right", duration=0.15),
                      "jump": InputAction(kind="key", value="space", duration=0.75)},
             mine_requires_grounded_level_view=mine_requires_grounded_level_view,
             mine_requires_target_at_crosshair=mine_requires_target_at_crosshair)
-        return self.module.OmniAgent(db_path=self.path, hwnd=123, game_id=game_id,input_backend="native",
+        return self.module.OmniAgent(db_path=self.path, hwnd=123, game_id=game_id,input_backend=input_backend,
                                      emergency_hotkey_enabled=False, telemetry_enabled=False,
                                      profile=profile)
+
+    def test_runtime_backend_override_is_reflected_in_shared_profile(self):
+        agent = self.create(input_backend="window")
+        self.assertEqual(agent.input_backend, "window")
+        self.assertEqual(agent.profile.input_backend, "window")
+        agent.set_input_backend("native")
+        self.assertEqual(agent.profile.input_backend, "native")
 
     def test_experience_reaches_brain_after_restart_and_replans(self):
         click = BrainDecision(action_type="click", x=500, y=700, observation="menu")

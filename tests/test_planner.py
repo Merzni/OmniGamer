@@ -256,6 +256,24 @@ class GoalPlannerTests(unittest.TestCase):
                                              "expected_result": "changed",
                                              "success_check": "visible change"}]}, profile)
 
+    def test_window_backend_hides_and_rejects_camera_dependent_skills(self):
+        profile = GameProfile(game_id="window-camera", camera_type="first_person",
+                              input_backend="window", ui_adapters=["stacked_main_menu"])
+        planner = GoalPlanner(self.registry, lambda **_: plan_for())
+        offered = {skill["name"] for skill in planner._profile_catalog(profile)}
+        self.assertTrue({"approach_target", "search_target", "turn"}.isdisjoint(offered))
+        self.assertIn("move_pulse", offered)
+        self.assertIn("click_menu_target", offered)
+        for skill, args in (
+                ("approach_target", {"target_text": "target"}),
+                ("search_target", {"target_text": "target", "sweep": 2}),
+                ("turn", {"direction": "right", "amount": 20})):
+            with self.subTest(skill=skill), self.assertRaisesRegex(
+                    ValueError, "relative camera input is unavailable"):
+                planner.validate({"steps": [{"skill": skill, "args": args,
+                                             "expected_result": "changed",
+                                             "success_check": "visible change"}]}, profile)
+
     def test_interaction_skill_requires_profile_action_and_region(self):
         planner = GoalPlanner(self.registry, lambda **_: plan_for())
         step = {"steps": [{"skill": "interact_until_change",

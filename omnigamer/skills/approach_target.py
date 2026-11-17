@@ -462,6 +462,8 @@ class ApproachTargetSkill:
         current_frame = None
         current_detection = None
         current_box = None
+        if self.profile is not None and self.profile.input_backend == "window":
+            return self._result("UNCERTAIN", "input_backend_has_no_relative_camera")
         if self.profile is not None and self.profile.camera_type == "none":
             return self._result("UNCERTAIN", "profile_has_no_camera")
         try:

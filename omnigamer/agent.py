@@ -44,6 +44,8 @@ class OmniAgent:
             profile = load_profile(game_id)
         self.profile = profile
         self.input_backend = input_backend or getattr(profile, "input_backend", None) or config.input_backend
+        if self.profile is not None and hasattr(self.profile, "input_backend"):
+            self.profile.input_backend = self.input_backend
         self._build_controls()
         self.brain = VisionBrain(api_url=vlm_url, model_name=config.vlm_model_name,
                                  image_max_size=config.image_max_size, max_tokens=config.vlm_max_tokens,
@@ -255,6 +257,8 @@ class OmniAgent:
         with self._step_lock:
             self.pointer.hide()
             self.input_backend = backend
+            if self.profile is not None and hasattr(self.profile, "input_backend"):
+                self.profile.input_backend = backend
             self._build_controls()
 
     def prepare_target(self, *, focus=True):

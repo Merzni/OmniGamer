@@ -136,6 +136,26 @@ class ApproachTargetTests(unittest.TestCase):
         self.assertEqual(detector.calls, 0)
         self.assertEqual(controls.calls, [])
 
+    def test_window_backend_rejects_camera_approach_before_capture_or_input(self):
+        capture = FakeCapture()
+        detector = FakeDetector([[box(0.5, 0.2)]])
+        controls = FakeControls()
+        profile = GameProfile(game_id="window-camera", camera_type="first_person",
+                              input_backend="window")
+        skill = ApproachTargetSkill(
+            capture=capture, target_text="target", detector=detector,
+            controls=controls, camera_guard=FakeGuard(), game_id="window-camera",
+            calibration_path=self.calibration, profile=profile,
+        )
+
+        result = skill.run()
+
+        self.assertEqual((result.state, result.reason),
+                         ("UNCERTAIN", "input_backend_has_no_relative_camera"))
+        self.assertEqual(capture.index, 0)
+        self.assertEqual(detector.calls, 0)
+        self.assertEqual(controls.calls, [])
+
     def test_reaches_by_centered_height_plateau(self):
         skill, _, _ = self.make_skill([
             [box(0.5, 0.50)], [reach_box()], [reach_box()],

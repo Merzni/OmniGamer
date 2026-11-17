@@ -271,7 +271,7 @@ class GoalPlanner:
             return catalog
         if menu_visible:
             catalog = [skill for skill in catalog if skill["name"] not in MENU_UNSAFE_SKILLS]
-        if profile.camera_type == "none":
+        if profile.camera_type == "none" or profile.input_backend == "window":
             catalog = [skill for skill in catalog
                        if skill["name"] not in CAMERA_DEPENDENT_SKILLS]
         if not profile.ui_adapters:
@@ -295,9 +295,9 @@ class GoalPlanner:
         for step in plan.steps:
             if menu_visible and step.skill in MENU_UNSAFE_SKILLS:
                 raise ValueError(f"Skill {step.skill!r} cannot operate a recognized menu screen")
-            if (profile and profile.camera_type == "none"
+            if (profile and (profile.camera_type == "none" or profile.input_backend == "window")
                     and step.skill in CAMERA_DEPENDENT_SKILLS):
-                raise ValueError(f"Skill {step.skill!r} requires a camera unavailable in profile "
+                raise ValueError(f"Skill {step.skill!r} requires a camera; relative camera input is unavailable in profile "
                                  f"{profile.game_id!r}")
             spec = self.registry.get(step.skill)
             params = spec.validate_args(step.args)
