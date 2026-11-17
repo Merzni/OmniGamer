@@ -355,6 +355,8 @@ class VisionBrain:
         boxes=button_candidates(frame)
         adapters = set(getattr(profile, "ui_adapters", ()) or ())
         world_adapter = "world_selection" in adapters
+        stacked_menu_layout = ("stacked_main_menu" in adapters
+                               and stacked_main_menu_layout(boxes))
         measured=self._world_list_action(frame,decision,boxes) if world_adapter else None
         if measured is not None:return measured
         prompt=("Locate ONLY the intended visible menu control in the screenshot. Ignore the actor's coordinates. "
@@ -388,16 +390,17 @@ class VisionBrain:
             expected_result:str=Field(min_length=1,max_length=100)
             enabled:bool
             confidence:float=Field(ge=0,le=1)
+        context_size = 640 if stacked_menu_layout else 960
+        context_frame = labeled_frame(frame,boxes,max_size=context_size)
         response=self._post(self.api_url,json={"model":self.model_name,"messages":[
             {"role":"system","content":prompt},{"role":"user","content":[
-                {"type":"image_url","image_url":{"url":self.image_to_base64_data_uri(labeled_frame(frame,boxes),960)}},
+                {"type":"image_url","image_url":{"url":self.image_to_base64_data_uri(context_frame,context_size)}},
             {"type":"image_url","image_url":{"url":self.image_to_base64_data_uri(candidate_cards(frame,boxes),960)}}]}],
             "temperature":0,"max_tokens":256,"response_format":self._response_format(Target)},
             timeout=(self.timeout if timeout_seconds is None else max(0.05,min(self.timeout,timeout_seconds))))
         response.raise_for_status()
         target=Target.model_validate_json(response.json()["choices"][0]["message"]["content"])
-        if ("stacked_main_menu" in adapters and target.scene_type in {"menu","unknown"}
-                and stacked_main_menu_layout(boxes)):
+        if (stacked_menu_layout and target.scene_type in {"menu","unknown"}):
             target.scene_type="menu"
             target.menu_id="main_menu"
             target.menu_state="default"

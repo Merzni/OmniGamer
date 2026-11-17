@@ -1,5 +1,5 @@
 """Actor intent must become a measured, checked target before input."""
-import json,tempfile,unittest
+import base64,json,io,tempfile,unittest
 from pathlib import Path
 from unittest.mock import Mock,patch
 from PIL import Image,ImageDraw
@@ -33,7 +33,11 @@ class GroundingTests(unittest.TestCase):
         self.assertEqual((decision.x,decision.y),(round((x+z)/2),round((y+b)/2)))
         self.assertEqual(decision.scene_type,'menu')
         self.assertEqual(decision.expected_result,'gameplay')
-        self.assertIn('response_format',post.call_args.kwargs['json'])
+        payload=post.call_args.kwargs['json']
+        self.assertIn('response_format',payload)
+        first=payload['messages'][1]['content'][0]['image_url']['url']
+        context=Image.open(io.BytesIO(base64.b64decode(first.split(',',1)[1])))
+        self.assertEqual(context.size,(960,540))
 
     def test_disabled_or_unlocalized_control_is_never_clicked(self):
         for changes in ({'enabled':False},{'confidence':.5},{'candidate_id':0,'bbox':[0,0,1000,1000]},
@@ -77,12 +81,18 @@ class GroundingTests(unittest.TestCase):
         target=next(box for box in boxes if 390<box[1]<420)
         response,_=self.target(scene_type='unknown',menu_id='unknown',candidate_id=boxes.index(target)+1,
             bbox=target,label='Одиночная игра',expected_result='world_select')
-        with patch('omnigamer.vision_brain.requests.post',return_value=response):
+        with patch('omnigamer.vision_brain.requests.post',return_value=response) as post:
             result=self.brain.ground_click(frame,BrainDecision(action_type='click',
                 target_label='Одиночная игра',intent='Open world list'),
                 profile=load_profile('minecraft'))
         self.assertEqual(result.scene_type,'menu')
         self.assertEqual(result.menu_id,'main_menu')
+        payload=post.call_args.kwargs['json']
+        images=payload['messages'][1]['content']
+        sizes=[Image.open(io.BytesIO(base64.b64decode(item['image_url']['url'].split(',',1)[1]))).size
+               for item in images]
+        self.assertEqual(sizes[0],(640,351))
+        self.assertEqual(sizes[1][0],960)
 
     def test_stacked_main_menu_geometry_rejects_incomplete_layout(self):
         boxes=[[340,405,719,470],[340,487,719,551],[340,568,719,633],

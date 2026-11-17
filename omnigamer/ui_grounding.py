@@ -106,9 +106,9 @@ def button_candidates(frame):
             for x,y,z,b in sorted(merged,key=lambda b:(b[1],b[0]))[:40]]
 
 
-def labeled_frame(frame,boxes):
+def labeled_frame(frame,boxes,max_size=960):
     image=frame.convert("RGB").copy()
-    image.thumbnail((960,960))
+    image.thumbnail((max_size,max_size))
     draw=ImageDraw.Draw(image)
     for index,box in enumerate(boxes,1):
         x,y,z,b=[int(v*s/1000) for v,s in zip(box,(image.width,image.height,image.width,image.height))]
