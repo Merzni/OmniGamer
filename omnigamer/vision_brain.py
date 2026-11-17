@@ -403,7 +403,18 @@ class VisionBrain:
                 raise ValueError("Play is visibly disabled; select a world row first")
         if target.scene_type!="menu" or not target.enabled or target.confidence<.85 or not target.label.strip():
             raise ValueError("Menu target is missing, disabled or not confidently localized")
-        box=boxes[target.candidate_id-1] if target.candidate_id else target.bbox
+        if "\ufffd" in target.label:
+            raise ValueError("Menu target label is unreadable")
+        bbox=target.bbox
+        bx,by,bz,bb=bbox
+        if not (0<=bx<bz<=1000 and 0<=by<bb<=1000 and bz-bx>=15 and 8<=bb-by<=200):
+            raise ValueError("Invalid menu target bounds")
+        box=boxes[target.candidate_id-1] if target.candidate_id else bbox
+        if target.candidate_id:
+            cx=(box[0]+box[2])/2
+            cy=(box[1]+box[3])/2
+            if not (bx<=cx<=bz and by<=cy<=bb):
+                raise ValueError(f"Menu candidate {target.candidate_id} does not match returned bbox")
         x,y,z,b=box
         if not (0<=x<z<=1000 and 0<=y<b<=1000 and z-x>=15 and 8<=b-y<=200):
             raise ValueError("Invalid menu target bounds")

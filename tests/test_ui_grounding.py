@@ -20,7 +20,7 @@ class GroundingTests(unittest.TestCase):
         boxes=button_candidates(self.frame)
         self.assertTrue(boxes)
         payload=dict(scene_type='menu',menu_id='main_menu',menu_state='default',candidate_id=1,
-            bbox=[0,0,1000,1000],label='PLAY',expected_result='gameplay',enabled=True,confidence=.95)
+            bbox=boxes[0],label='PLAY',expected_result='gameplay',enabled=True,confidence=.95)
         payload.update(changes)
         response=Mock();response.json.return_value={'choices':[{'message':{'content':json.dumps(payload)}}]}
         return response,boxes
@@ -41,6 +41,18 @@ class GroundingTests(unittest.TestCase):
             response,_=self.target(**changes)
             with patch('omnigamer.vision_brain.requests.post',return_value=response),self.assertRaises(ValueError):
                 self.brain.ground_click(self.frame,BrainDecision(action_type='click',x=500,y=500))
+
+    def test_candidate_id_must_match_localizer_bbox(self):
+        response,_=self.target(bbox=[700,700,900,850])
+        with patch('omnigamer.vision_brain.requests.post',return_value=response), \
+             self.assertRaisesRegex(ValueError,'does not match returned bbox'):
+            self.brain.ground_click(self.frame,BrainDecision(action_type='click',target_label='PLAY'))
+
+    def test_unreadable_localized_label_is_never_clicked(self):
+        response,_=self.target(label='\ufffd\ufffd\ufffd')
+        with patch('omnigamer.vision_brain.requests.post',return_value=response), \
+             self.assertRaisesRegex(ValueError,'label is unreadable'):
+            self.brain.ground_click(self.frame,BrainDecision(action_type='click',target_label='PLAY'))
 
     def test_missing_schema_fields_and_truncated_action_do_not_execute(self):
         with tempfile.TemporaryDirectory() as td:
