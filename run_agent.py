@@ -130,7 +130,7 @@ def main():
                 from omnigamer.skills.registry import default_registry
                 from omnigamer.skills.telemetry import SkillStepRecorder
 
-                registry = default_registry()
+                registry = default_registry(profile=profile)
                 detector = DetectorClient()
                 planner = GoalPlanner(registry, agent.brain.plan_goal)
                 outcome_store = SkillOutcomeStore(":memory:" if args.dry_run else agent.memory.db_path)
@@ -177,6 +177,14 @@ def main():
                     if spec.name == "search_target":
                         return spec.executor(skill_args, **shared)
                     if spec.name == "interact_until_change":
+                        return spec.executor(skill_args, **shared)
+                    if spec.name == "click_menu_target":
+                        remaining = max(0.05, deadline - time.monotonic())
+                        shared["grounder"] = lambda frame, decision: agent._call_interruptibly(
+                            agent.brain.ground_click, frame, decision, profile=profile,
+                            timeout_seconds=remaining)
+                        shared["prepare_target"] = agent.prepare_target
+                        shared["check_target"] = agent.check_target
                         return spec.executor(skill_args, **shared)
                     if spec.name in {"move_pulse", "turn"}:
                         return spec.executor(skill_args, **shared)

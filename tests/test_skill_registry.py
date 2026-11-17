@@ -10,14 +10,26 @@ class SkillRegistryTests(unittest.TestCase):
     def test_catalog_exposes_validated_contract_for_approach(self):
         registry = default_registry()
         self.assertEqual(registry.names(), (
-            "approach_target", "interact_until_change", "move_pulse",
+            "approach_target", "click_menu_target", "interact_until_change", "move_pulse",
             "search_target", "turn", "wait_for_condition"))
-        schema = registry.planner_catalog()[0]
+        schema = next(item for item in registry.planner_catalog() if item["name"] == "approach_target")
         self.assertEqual(schema["resources"], ["detector", "input", "camera_guard"])
         self.assertIn("APPROACH_REACHED", schema["results"])
         self.assertNotIn("SUCCESS", schema["results"])
         self.assertEqual(registry.validate("approach_target", {"target_text": "a target"}).target_text,
                          "a target")
+
+    def test_menu_skill_is_only_offered_to_profiles_with_ui_adapter(self):
+        from omnigamer.profiles import GameProfile
+
+        without_ui = default_registry(GameProfile(game_id="plain"))
+        with_ui = default_registry(GameProfile(game_id="ui", ui_adapters=["world_selection"]))
+        self.assertNotIn("click_menu_target", without_ui.names())
+        self.assertIn("click_menu_target", with_ui.names())
+        params = with_ui.validate("click_menu_target", {
+            "target_label": "Singleplayer", "intent": "Open the world list",
+            "expected_result": "world selection screen"})
+        self.assertEqual(params.target_label, "Singleplayer")
 
     def test_unknown_skill_and_extra_parameters_are_rejected(self):
         registry = default_registry()

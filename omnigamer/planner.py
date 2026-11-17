@@ -74,6 +74,10 @@ class DeadlineControls:
     def hold_mouse(self, button, duration):
         return self.controls.hold_mouse(button=button, duration=self._duration(duration))
 
+    def click(self, x=None, y=None, button="left", hold_time=0.08):
+        return self.controls.click(x=x, y=y, button=button,
+                                   hold_time=self._duration(hold_time))
+
     def move_camera(self, dx, dy):
         if self.deadline <= self.clock():
             raise TimeoutError("skill time budget exhausted")
@@ -121,6 +125,10 @@ class BudgetControls:
     def hold_mouse(self, button, duration):
         self.budget.consume()
         return self.controls.hold_mouse(button=button, duration=duration)
+
+    def click(self, x=None, y=None, button="left", hold_time=0.08):
+        self.budget.consume()
+        return self.controls.click(x=x, y=y, button=button, hold_time=hold_time)
 
     def move_camera(self, dx, dy):
         self.budget.consume()
@@ -261,6 +269,8 @@ class GoalPlanner:
         if profile.camera_type == "none":
             catalog = [skill for skill in catalog
                        if skill["name"] not in CAMERA_DEPENDENT_SKILLS]
+        if not profile.ui_adapters:
+            catalog = [skill for skill in catalog if skill["name"] != "click_menu_target"]
         if not profile.actions or not profile.regions:
             catalog = [skill for skill in catalog if skill["name"] != "interact_until_change"]
         for skill in catalog:
@@ -285,6 +295,11 @@ class GoalPlanner:
             spec = self.registry.get(step.skill)
             params = spec.validate_args(step.args)
             values = params.model_dump()
+            if step.skill == "click_menu_target":
+                if not profile or not profile.ui_adapters:
+                    raise ValueError("Skill 'click_menu_target' requires a profile UI adapter")
+                if values["expected_result"].strip().casefold() != step.expected_result.strip().casefold():
+                    raise ValueError("click_menu_target expected_result must match the step postcondition")
             if profile and step.skill == "interact_until_change":
                 if not profile.actions or not profile.regions:
                     raise ValueError(f"Skill 'interact_until_change' requires configured actions and regions "
@@ -416,10 +431,11 @@ class GoalExecutor:
         result_code = result.get("result_code")
         needs_check = result_code in {
             "REGION_CHANGE_UNCONFIRMED", "SUCCESS_REGION_CHANGE",
-            "INTERACTION_OUTCOME_UNCONFIRMED"}
+            "INTERACTION_OUTCOME_UNCONFIRMED", "MENU_ACTION_UNCONFIRMED"}
         if not force and not needs_check:
             return result
-        verification_scope = scope or ("goal_postcondition" if force else
+        verification_scope = scope or ("menu_transition" if result_code == "MENU_ACTION_UNCONFIRMED" else
+                              "goal_postcondition" if force else
                               "interaction_outcome" if result_code == "INTERACTION_OUTCOME_UNCONFIRMED" else
                               "region_change")
         if force and result.get("status") != SkillStatus.SUCCESS.value:
@@ -640,15 +656,16 @@ class GoalExecutor:
                         self.logger({"event": "would_send", **resolved})
                 else:
                     verification_before = (step_frame if self.result_verifier and
-                                           (step.skill == "interact_until_change" or is_final_step)
+                                           (step.skill in {"interact_until_change", "click_menu_target"} or is_final_step)
                                            else None)
                     result = self.execute_skill(spec, params, available)
                     result = result.model_dump() if hasattr(result, "model_dump") else result
                     verification_candidate = result.get("result_code") in {
                         "REGION_CHANGE_UNCONFIRMED", "SUCCESS_REGION_CHANGE",
-                        "INTERACTION_OUTCOME_UNCONFIRMED"}
+                        "INTERACTION_OUTCOME_UNCONFIRMED", "MENU_ACTION_UNCONFIRMED"}
                     verify_final = is_final_step and result.get("status") == SkillStatus.SUCCESS.value
-                    if (step.skill == "interact_until_change" and verification_candidate) or verify_final:
+                    if (step.skill in {"interact_until_change", "click_menu_target"}
+                            and verification_candidate) or verify_final:
                         verification_after = self.frame_provider() if self.result_verifier else None
                         verification_budget = self.profile.motion_limits.max_run_seconds - (
                             self.clock() - started)

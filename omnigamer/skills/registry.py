@@ -15,6 +15,7 @@ from .basic import (
     wait_for_condition,
 )
 from .contracts import SkillRegistry, SkillResult, SkillSpec, SkillStatus
+from .menu import ClickMenuTargetParams, click_menu_target
 from .telemetry import SkillStepRecorder
 
 
@@ -146,8 +147,15 @@ def execute_wait_for_condition(args, **dependencies):
                          lambda: wait_for_condition(**params.model_dump(), **dependencies))
 
 
-def default_registry():
-    return SkillRegistry((
+def execute_click_menu_target(args, **dependencies):
+    params = _validate(ClickMenuTargetParams, args)
+    dependencies["recorder"] = _recorder_for("click_menu_target", params.model_dump(), dependencies)
+    return _run_recorded(dependencies.get("recorder"),
+                         lambda: click_menu_target(**params.model_dump(), **dependencies))
+
+
+def default_registry(profile=None):
+    specs = [
         SkillSpec(
             name="approach_target",
             description="Align with and move toward a visually detected target using bounded camera and movement pulses.",
@@ -179,4 +187,13 @@ def default_registry():
                   WaitForConditionParams, ("A detector or named region is configured.",),
                   ("CONDITION_MET", "FAILED", "ABORT", "UNCONFIRMED"),
                   300, ("capture", "detector"), execute_wait_for_condition),
-    ))
+    ]
+    if profile is None or profile.ui_adapters:
+        specs.append(SkillSpec("click_menu_target",
+                  "Locate one enabled, visible menu control from the current screenshot and send one left click. "
+                  "Target label, intent and required next result must agree; runtime verifies the transition from a new screenshot.",
+                  ClickMenuTargetParams, ("The profile enables a UI adapter.",
+                                          "The current screen is independently verified as a menu."),
+                  ("MENU_ACTION_UNCONFIRMED", "FAILED", "ABORT", "UNCONFIRMED"),
+                  90, ("capture", "input", "menu_grounding"), execute_click_menu_target))
+    return SkillRegistry(specs)

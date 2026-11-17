@@ -51,6 +51,22 @@ class GoalPlannerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             GoalPlan.model_validate({"steps": [step] * 7})
 
+    def test_menu_skill_requires_profile_adapter_and_matching_expected_result(self):
+        menu_profile = GameProfile(game_id="minecraft", ui_adapters=["world_selection"])
+        planner = GoalPlanner(default_registry(), lambda **_: None)
+        args = {"target_label": "Одиночная игра", "intent": "Open world list",
+                "expected_result": "world list"}
+        valid = plan_for("click_menu_target", args)
+        valid["steps"][0]["expected_result"] = "world list"
+        self.assertEqual(planner.validate(valid, profile=menu_profile).steps[0].skill,
+                         "click_menu_target")
+        with self.assertRaisesRegex(ValueError, "match the step postcondition"):
+            mismatched = plan_for("click_menu_target", args)
+            mismatched["steps"][0]["expected_result"] = "delete world"
+            planner.validate(mismatched, profile=menu_profile)
+        self.assertNotIn("click_menu_target", {
+            item["name"] for item in planner._profile_catalog(self.profile)})
+
     def test_input_action_budget_caps_real_control_calls(self):
         controls = Mock()
         budget = InputActionBudget(2)
