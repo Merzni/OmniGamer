@@ -12,12 +12,21 @@ from .contracts import SkillResult, SkillStatus
 
 
 def _known_menu_result(value):
-    text = " ".join(re.findall(r"[a-z0-9а-яё]+", str(value).casefold()))
-    if "world" in text and "selected" in text:
+    words = re.findall(r"[a-z0-9а-яё]+", str(value).casefold())
+    text = " ".join(words)
+    word_set = set(words)
+    has_world = bool(word_set & {"world", "мир", "мира", "мире", "миров"})
+    if (("world" in word_set and "selected" in word_set)
+            or (has_world and word_set & {"выбран", "выбрана", "выбрано", "выбраны"})):
         return "world_selected"
-    if "gameplay" in text or ("world" in text and "load" in text) or "game started" in text:
+    if ("gameplay" in word_set or "геймплей" in word_set
+            or ("игровой" in word_set and "процесс" in word_set)
+            or ("игра" in word_set and word_set & {"началась", "запущена", "стартовала"})
+            or ("world" in word_set and "load" in word_set)
+            or "game started" in text):
         return "gameplay"
-    if "world" in text and any(word in text for word in ("list", "selection", "select")):
+    if ("world" in word_set and word_set & {"list", "selection", "select"}) or (
+            has_world and word_set & {"список", "списке", "выбор", "выбору", "выбора"}):
         return "world_select"
     return None
 

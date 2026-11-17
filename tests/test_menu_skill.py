@@ -50,6 +50,31 @@ class MenuSkillTests(unittest.TestCase):
             self.invoke(Mock(return_value=unsafe))
         self.controls.click.assert_not_called()
 
+    def test_russian_localized_menu_transition_cannot_override_requested_result(self):
+        unsafe = self.grounded.model_copy(update={"expected_result": "Мир выбран"})
+        with self.assertRaisesRegex(ValueError, "different expected result"):
+            self.invoke(Mock(return_value=unsafe))
+        self.controls.click.assert_not_called()
+
+    def test_equivalent_russian_world_selection_result_is_accepted(self):
+        localized = self.grounded.model_copy(update={
+            "expected_result": "Список доступных миров"})
+        result = click_menu_target("Одиночная игра", "Open the world list",
+            "Переход к выбору мира", capture=self.capture, controls=self.controls,
+            profile=self.profile, grounder=Mock(return_value=localized),
+            prepare_target=Mock(), check_target=Mock())
+        self.assertEqual(result.result_code, "MENU_ACTION_UNCONFIRMED")
+        self.controls.click.assert_called_once()
+
+    def test_equivalent_russian_gameplay_result_is_accepted(self):
+        localized = self.grounded.model_copy(update={"expected_result": "Игра запущена"})
+        result = click_menu_target("Одиночная игра", "Start the game",
+            "Переход в игровой процесс", capture=self.capture, controls=self.controls,
+            profile=self.profile, grounder=Mock(return_value=localized),
+            prepare_target=Mock(), check_target=Mock())
+        self.assertEqual(result.result_code, "MENU_ACTION_UNCONFIRMED")
+        self.controls.click.assert_called_once()
+
     def test_world_selection_adapter_refuses_unspecified_transition(self):
         unsafe = self.grounded.model_copy(update={"menu_id": "world_select",
                                                   "menu_state": "no_selection",
