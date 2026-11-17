@@ -18,6 +18,7 @@ from .skills.contracts import SkillStatus
 OUTCOME_SUCCESS_CODES = frozenset({
     "SUCCESS_VERIFIED", "TARGET_DETECTED", "APPROACH_REACHED", "CONDITION_MET",
 })
+CAMERA_DEPENDENT_SKILLS = frozenset({"approach_target", "search_target", "turn"})
 
 
 def _verified_example(args_json, expected_result, success_check):
@@ -257,6 +258,9 @@ class GoalPlanner:
         catalog = deepcopy(self.registry.planner_catalog())
         if not profile:
             return catalog
+        if profile.camera_type == "none":
+            catalog = [skill for skill in catalog
+                       if skill["name"] not in CAMERA_DEPENDENT_SKILLS]
         for skill in catalog:
             properties = skill.get("parameters", {}).get("properties", {})
             if skill["name"] == "interact_until_change":
@@ -272,6 +276,10 @@ class GoalPlanner:
         plan = raw if isinstance(raw, GoalPlan) else GoalPlan.model_validate(raw)
         validated = []
         for step in plan.steps:
+            if (profile and profile.camera_type == "none"
+                    and step.skill in CAMERA_DEPENDENT_SKILLS):
+                raise ValueError(f"Skill {step.skill!r} requires a camera unavailable in profile "
+                                 f"{profile.game_id!r}")
             spec = self.registry.get(step.skill)
             params = spec.validate_args(step.args)
             values = params.model_dump()

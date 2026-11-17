@@ -35,7 +35,8 @@ def confirm_goal(*_args):
 
 class GoalPlannerTests(unittest.TestCase):
     def setUp(self):
-        self.profile = GameProfile(game_id="sim", motion_limits={"max_run_seconds": 20, "max_actions": 3})
+        self.profile = GameProfile(game_id="sim", camera_type="first_person",
+                                   motion_limits={"max_run_seconds": 20, "max_actions": 3})
         self.registry = default_registry()
 
     def test_rejects_unknown_skill_and_invalid_arguments(self):
@@ -191,6 +192,32 @@ class GoalPlannerTests(unittest.TestCase):
         self.assertEqual(schema["parameters"]["properties"]["action"]["enum"],
                          ["interact", "primary_hold"])
         self.assertIn("not configured", calls[1]["validation_error"])
+
+    def test_camera_free_profile_hides_and_rejects_camera_dependent_skills(self):
+        profile = GameProfile(game_id="flat-game", camera_type="none")
+        requests = []
+        responses = [
+            {"steps": [{"skill": "turn", "args": {"direction": "right", "amount": 20},
+                        "expected_result": "screen scrolls", "success_check": "landmark changes"}]},
+            plan_for(),
+        ]
+        planner = GoalPlanner(self.registry,
+                              lambda **request: requests.append(request) or responses.pop(0))
+
+        plan = planner.plan(frame=None, goal="move", profile=profile)
+
+        offered = {skill["name"] for skill in requests[0]["skills"]}
+        self.assertTrue({"approach_target", "search_target", "turn"}.isdisjoint(offered))
+        self.assertEqual(plan.steps[0].skill, "move_pulse")
+        self.assertIn("requires a camera", requests[1]["validation_error"])
+        for skill, args in (
+                ("approach_target", {"target_text": "target"}),
+                ("search_target", {"target_text": "target", "sweep": 2}),
+                ("turn", {"direction": "right", "amount": 20})):
+            with self.subTest(skill=skill), self.assertRaisesRegex(ValueError, "requires a camera"):
+                planner.validate({"steps": [{"skill": skill, "args": args,
+                                             "expected_result": "changed",
+                                             "success_check": "visible change"}]}, profile)
 
     def test_outcome_store_separates_games_and_summarizes_success_rate(self):
         with tempfile.TemporaryDirectory() as tmp:
