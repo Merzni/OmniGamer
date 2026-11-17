@@ -244,6 +244,18 @@ class TelemetryTests(unittest.TestCase):
         self.assertIn("repeated_failure_count: 1 шагов с state_repeat/repeat_warning", result.stdout)
         self.assertIn("memory_reuse_count: 2", result.stdout)
 
+    def test_dry_run_is_not_counted_as_task_failure(self):
+        run_dir = self.data_dir / "dry-run-summary"
+        run_dir.mkdir()
+        (run_dir / "run_meta.json").write_text(json.dumps({"run_id": "dry-run-summary"}),
+                                                encoding="utf-8")
+        (run_dir / "goal_steps.jsonl").write_text(
+            json.dumps({"event": "run_finish", "status": "DRY_RUN", "reason": "plan_completed"}) + "\n",
+            encoding="utf-8")
+        report = summarize(run_dir)
+        self.assertIn("task_success_rate: не применяется (dry-run)", report)
+        self.assertIn("time_to_success: нет подтверждённого успеха", report)
+
 
 if __name__ == "__main__":
     unittest.main()

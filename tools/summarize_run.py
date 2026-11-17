@@ -183,7 +183,9 @@ def summarize(run_dir):
     recoveries = sum((row.get("action") or {}).get("type") == "jump_recovery" for row in skill_steps)
     repeated_failures = sum(bool((step.get("loop") or {}).get("state_repeat")
                                  or (step.get("loop") or {}).get("repeat_warning")) for step in steps)
-    if finished:
+    if goal_result.get("status") == "DRY_RUN":
+        task_success = "не применяется (dry-run)"
+    elif finished:
         task_success = "1/1 (100.0%)" if succeeded else "0/1 (0.0%)"
     else:
         task_success = "нет завершённого goal-прогона"
