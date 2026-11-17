@@ -611,10 +611,12 @@ class OmniAgent:
         )
         self.last_guard_reason = guard_reason or profile_camera_reason
         if self.last_guard_reason:
-            decision = BrainDecision(**filtered).model_copy(update={
-                "intent": "Restore a safe usable view before continuing play",
-                "commentary": "Проверю направление взгляда и безопасный путь.",
-            })
+            decision = BrainDecision(**filtered)
+            if not profile_camera_reason:
+                decision = decision.model_copy(update={
+                    "intent": "Restore a safe usable view before continuing play",
+                    "commentary": "Проверю направление взгляда и безопасный путь.",
+                })
             self.last_action_source = "camera_guard"
             learnable = decision.action_type != "wait"
         decision = self._apply_profile_motion(decision)

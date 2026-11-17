@@ -235,6 +235,10 @@ class AgentMemoryTests(unittest.TestCase):
         result = agent.step()
 
         self.assertEqual(result["decision"]["action_type"], "wait")
+        self.assertEqual(result["decision"]["intent"],
+                         "Wait because this input backend has no relative camera control")
+        self.assertEqual(result["decision"]["commentary"],
+                         "Поворот камеры здесь недоступен. Выберу другой ход.")
         self.assertEqual(agent.last_guard_reason, "input_backend_has_no_relative_camera")
         self.assertEqual(agent.last_action_source, "camera_guard")
         self.WindowInputController.return_value.move_camera.assert_not_called()
