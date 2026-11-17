@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 import time
 
+from PIL import ImageChops
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..vision_brain import BrainDecision
@@ -26,6 +27,18 @@ class ClickMenuTargetParams(BaseModel):
     target_label: str = Field(min_length=1, max_length=80)
     intent: str = Field(min_length=1, max_length=200)
     expected_result: str = Field(min_length=1, max_length=100)
+
+
+def _target_patch(frame, x, y):
+    width, height = frame.size
+    center_x = round(x * width / 1000)
+    center_y = round(y * height / 1000)
+    half_width = max(12, round(width * 0.20))
+    half_height = max(12, round(height * 0.08))
+    return frame.convert("RGB").crop((
+        max(0, center_x - half_width), max(0, center_y - half_height),
+        min(width, center_x + half_width), min(height, center_y + half_height),
+    ))
 
 
 def click_menu_target(target_label, intent, expected_result, *, capture, controls, profile, grounder,
@@ -68,6 +81,14 @@ def click_menu_target(target_label, intent, expected_result, *, capture, control
     prepare_target()
     if capture.get_client_rect() != before_rect:
         raise RuntimeError("Game window moved/resized during menu localization; click cancelled")
+    current_frame = capture.grab_frame()
+    if capture.last_rect != before_rect:
+        raise RuntimeError("Game window moved/resized while rechecking the menu target")
+    before_patch = _target_patch(frame, grounded.x, grounded.y)
+    current_patch = _target_patch(current_frame, grounded.x, grounded.y)
+    if before_patch.size != current_patch.size or ImageChops.difference(
+            before_patch, current_patch).getbbox() is not None:
+        raise RuntimeError("Menu target changed during localization; click cancelled")
     check_target()
     screen_x, screen_y = capture.norm_to_screen(grounded.x, grounded.y)
     controls.click(screen_x, screen_y, button="left", hold_time=0.08)

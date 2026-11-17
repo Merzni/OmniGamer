@@ -67,6 +67,31 @@ class MenuSkillTests(unittest.TestCase):
             self.invoke()
         self.controls.click.assert_not_called()
 
+    def test_target_change_during_localization_cancels_stale_click(self):
+        before = Image.new("RGB", (1000, 800), (20, 20, 20))
+        changed = before.copy()
+        from PIL import ImageDraw
+        ImageDraw.Draw(changed).rectangle((250, 350, 600, 580), fill=(220, 220, 220))
+        self.capture.grab_frame.side_effect = [before, changed, changed]
+
+        with self.assertRaisesRegex(RuntimeError, "target changed during localization"):
+            self.invoke()
+
+        self.assertEqual(self.capture.grab_frame.call_count, 2)
+        self.controls.click.assert_not_called()
+
+    def test_animation_outside_target_patch_does_not_cancel_click(self):
+        before = Image.new("RGB", (1000, 800), (20, 20, 20))
+        changed = before.copy()
+        from PIL import ImageDraw
+        ImageDraw.Draw(changed).rectangle((0, 0, 100, 100), fill=(220, 220, 220))
+        self.capture.grab_frame.side_effect = [before, changed, changed]
+
+        result = self.invoke()
+
+        self.assertEqual(result.result_code, "MENU_ACTION_UNCONFIRMED")
+        self.controls.click.assert_called_once_with(420, 540, button="left", hold_time=0.08)
+
     def test_menu_click_consumes_one_shared_input_action(self):
         budget = InputActionBudget(1)
         controls = BudgetControls(self.controls, budget)
