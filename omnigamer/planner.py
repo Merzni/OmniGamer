@@ -14,11 +14,14 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .config import config
 from .memory import GameMemory
 from .skills.contracts import SkillStatus
+from .ui_grounding import has_profile_menu_layout
 
 OUTCOME_SUCCESS_CODES = frozenset({
     "SUCCESS_VERIFIED", "TARGET_DETECTED", "APPROACH_REACHED", "CONDITION_MET",
 })
 CAMERA_DEPENDENT_SKILLS = frozenset({"approach_target", "search_target", "turn"})
+MENU_UNSAFE_SKILLS = frozenset({"interact_until_change", "move_pulse", "turn",
+                                "approach_target", "search_target"})
 
 
 def _verified_example(args_json, expected_result, success_check):
@@ -262,10 +265,12 @@ class GoalPlanner:
                                        else max_validation_retries)
         self.last_plan_metrics = {"duration_seconds": 0.0, "request_durations_seconds": []}
 
-    def _profile_catalog(self, profile):
+    def _profile_catalog(self, profile, menu_visible=False):
         catalog = deepcopy(self.registry.planner_catalog())
         if not profile:
             return catalog
+        if menu_visible:
+            catalog = [skill for skill in catalog if skill["name"] not in MENU_UNSAFE_SKILLS]
         if profile.camera_type == "none":
             catalog = [skill for skill in catalog
                        if skill["name"] not in CAMERA_DEPENDENT_SKILLS]
@@ -284,10 +289,12 @@ class GoalPlanner:
                 properties["region"]["enum"] = sorted(profile.regions)
         return catalog
 
-    def validate(self, raw, profile=None):
+    def validate(self, raw, profile=None, menu_visible=False):
         plan = raw if isinstance(raw, GoalPlan) else GoalPlan.model_validate(raw)
         validated = []
         for step in plan.steps:
+            if menu_visible and step.skill in MENU_UNSAFE_SKILLS:
+                raise ValueError(f"Skill {step.skill!r} cannot operate a recognized menu screen")
             if (profile and profile.camera_type == "none"
                     and step.skill in CAMERA_DEPENDENT_SKILLS):
                 raise ValueError(f"Skill {step.skill!r} requires a camera unavailable in profile "
@@ -349,10 +356,11 @@ class GoalPlanner:
         plan_started = time.monotonic()
         request_durations = []
         deadline = None if timeout_seconds is None else time.monotonic() + max(0.0, timeout_seconds)
+        menu_visible = has_profile_menu_layout(frame, profile)
         try:
             for attempt in range(self.max_validation_retries + 1):
                 request = dict(frame=frame, goal=goal, profile=profile,
-                               skills=self._profile_catalog(profile),
+                               skills=self._profile_catalog(profile, menu_visible=menu_visible),
                                outcome_summary=list(outcome_summary),
                                validation_error=error if attempt else failure)
                 if deadline is not None:
@@ -369,7 +377,7 @@ class GoalPlanner:
                 finally:
                     request_durations.append(max(0.0, time.monotonic() - request_started))
                 try:
-                    plan = self.validate(raw, profile=profile)
+                    plan = self.validate(raw, profile=profile, menu_visible=menu_visible)
                     signature = self.signature(plan, profile=profile)
                     if avoid_plan is not None and signature == avoid_plan:
                         raise ValueError("Plan exactly repeats the previous failed plan; choose a different strategy.")

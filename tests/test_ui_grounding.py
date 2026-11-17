@@ -4,7 +4,8 @@ from pathlib import Path
 from unittest.mock import Mock,patch
 from PIL import Image,ImageDraw
 from omnigamer.vision_brain import VisionBrain,BrainDecision
-from omnigamer.ui_grounding import button_candidates,world_selection_cues,stacked_main_menu_layout
+from omnigamer.ui_grounding import (button_candidates,world_selection_cues,stacked_main_menu_layout,
+                                    has_profile_menu_layout)
 from omnigamer.camera_feedback import camera_feedback
 from omnigamer.profiles import load_profile
 import numpy as np
@@ -78,6 +79,7 @@ class GroundingTests(unittest.TestCase):
             draw.rectangle(box,fill=(125,125,125),outline=(0,0,0),width=2)
         boxes=button_candidates(frame)
         self.assertTrue(stacked_main_menu_layout(boxes))
+        self.assertTrue(has_profile_menu_layout(frame,load_profile('minecraft')))
         target=next(box for box in boxes if 390<box[1]<420)
         response,_=self.target(scene_type='unknown',menu_id='unknown',candidate_id=boxes.index(target)+1,
             bbox=target,label='Одиночная игра',expected_result='world_select')
@@ -123,6 +125,7 @@ class GroundingTests(unittest.TestCase):
 
     def test_unknown_layout_cannot_prove_world_selection(self):
         self.assertEqual(world_selection_cues(self.frame),(None,None))
+        self.assertFalse(has_profile_menu_layout(self.frame,load_profile('minecraft')))
 
     @staticmethod
     def world_list(selected):
@@ -138,6 +141,7 @@ class GroundingTests(unittest.TestCase):
         return frame
 
     def test_existing_world_is_selected_then_played_from_measured_layout(self):
+        self.assertTrue(has_profile_menu_layout(self.world_list(False),load_profile('minecraft')))
         action=BrainDecision(action_type='click',x=1,y=999,intent='Start playing')
         with patch('omnigamer.vision_brain.requests.post') as post:
             row=self.brain.ground_click(self.world_list(False),action,profile=load_profile('minecraft'))

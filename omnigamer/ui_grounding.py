@@ -180,6 +180,16 @@ def world_selection_cues(frame):
     return outlined,enabled
 
 
+def has_profile_menu_layout(frame, profile):
+    """Return true only when an enabled profile adapter matches screen geometry."""
+    adapters = set(getattr(profile, "ui_adapters", ()) or ())
+    if not adapters or not hasattr(frame, "convert"):
+        return False
+    if "stacked_main_menu" in adapters and stacked_main_menu_layout(button_candidates(frame)):
+        return True
+    return "world_selection" in adapters and world_selection_cues(frame) != (None, None)
+
+
 def first_world_row(frame):
     """Locate a visible multi-line list entry, only in the recognized list layout."""
     if world_selection_cues(frame)==(None,None):return None

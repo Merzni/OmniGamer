@@ -3,7 +3,7 @@ import tempfile
 from contextlib import closing
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from PIL import Image
 from omnigamer.memory import GameMemory
@@ -66,6 +66,27 @@ class GoalPlannerTests(unittest.TestCase):
             planner.validate(mismatched, profile=menu_profile)
         self.assertNotIn("click_menu_target", {
             item["name"] for item in planner._profile_catalog(self.profile)})
+
+    def test_recognized_menu_filters_and_rejects_gameplay_interactions(self):
+        profile = GameProfile(game_id="menu", camera_type="first_person",
+                              ui_adapters=["stacked_main_menu"],
+                              actions={"interact": {"kind": "key", "value": "e"}},
+                              regions={"hotbar": {"x1": 0.3, "y1": 0.9, "x2": 0.7, "y2": 1}})
+        calls = []
+        planner = GoalPlanner(self.registry, lambda **kwargs: calls.append(kwargs) or plan_for(
+            "interact_until_change", {"region": "hotbar", "action": "interact", "max_repeats": 2}),
+            max_validation_retries=0)
+
+        with patch("omnigamer.planner.has_profile_menu_layout", return_value=True):
+            with self.assertRaisesRegex(PlanningError, "recognized menu screen"):
+                planner.plan(frame=object(), goal="Open single-player world selection",
+                             profile=profile)
+
+        offered = {skill["name"] for skill in calls[0]["skills"]}
+        self.assertNotIn("interact_until_change", offered)
+        self.assertNotIn("move_pulse", offered)
+        self.assertNotIn("turn", offered)
+        self.assertIn("click_menu_target", offered)
 
     def test_input_action_budget_caps_real_control_calls(self):
         controls = Mock()
