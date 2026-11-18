@@ -1247,8 +1247,16 @@ class GoalExecutor:
                     failed_step = (step.skill, params)
                     break
             else:
-                return self._finish({"status": "DRY_RUN" if self.dry_run else "SUCCESS",
-                                     "reason": "plan_completed", "steps": steps_used})
+                if not self.dry_run and plan.steps[-1].skill == "click_menu_target":
+                    # A menu transition only advances the screen state. Its step-level
+                    # success check cannot prove that the user's overall goal is done.
+                    # Replan from a fresh frame so a short navigation prefix cannot
+                    # terminate the run as a successful goal.
+                    failure = "menu_transition_completed; replan for the remaining user goal"
+                    avoid_plan = current_plan_signature
+                else:
+                    return self._finish({"status": "DRY_RUN" if self.dry_run else "SUCCESS",
+                                         "reason": "plan_completed", "steps": steps_used})
             if replans >= self.max_replans:
                 return self._finish({"status": "FAILED", "reason": failure or "replans_exhausted", "steps": steps_used})
             replans += 1

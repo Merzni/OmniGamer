@@ -1235,6 +1235,52 @@ class GoalPlannerTests(unittest.TestCase):
             would_send = next(row for row in logs if row["event"] == "would_send")
             self.assertEqual(would_send["grounded_target"]["evidence"]["input_actions"], 0)
 
+    def test_verified_menu_transition_replans_instead_of_completing_user_goal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = GameProfile(game_id="minecraft", ui_adapters=["world_selection"],
+                motion_limits={"max_run_seconds": 20, "max_actions": 3})
+            menu_plan = {"steps": [{"skill": "click_menu_target", "args": {
+                "target_label": "visible_world_row", "intent": "Select existing world",
+                "expected_result": "world_selected"}, "expected_result": "world_selected",
+                "success_check": "The world is visibly selected"}]}
+            goal_plan = plan_for("move_pulse")
+            plans = [menu_plan, goal_plan]
+            plan_calls, executed, verified = [], [], []
+
+            def request_plan(**kwargs):
+                plan_calls.append(kwargs)
+                return plans.pop(0)
+
+            def execute(spec, params, _timeout):
+                executed.append(spec.name)
+                if spec.name == "click_menu_target":
+                    return SkillResult(status=SkillStatus.UNCONFIRMED,
+                        result_code="MENU_ACTION_UNCONFIRMED", reason="click sent")
+                return SkillResult(status=SkillStatus.SUCCESS,
+                    result_code="SUCCESS", reason="step completed")
+
+            class MenuTransitionAssessment(ConfirmedAssessment):
+                menu_action_succeeded = True
+
+            def verify(step, *_args):
+                verified.append(step.skill)
+                return MenuTransitionAssessment() if step.skill == "click_menu_target" else ConfirmedAssessment()
+
+            frame = Image.new("RGB", (32, 32), (20, 30, 40))
+            executor = GoalExecutor(GoalPlanner(default_registry(profile), request_plan),
+                default_registry(profile), SkillOutcomeStore(Path(tmp) / "outcomes.db"),
+                profile=profile, game_id="minecraft", execute_skill=execute,
+                frame_provider=lambda: frame.copy(), stop_check=lambda: None,
+                result_verifier=verify, max_replans=1)
+
+            result = executor.run("Добудь дерево")
+
+        self.assertEqual(result["status"], "SUCCESS")
+        self.assertEqual(len(plan_calls), 2)
+        self.assertEqual(executed, ["click_menu_target", "move_pulse"])
+        self.assertEqual(verified, ["click_menu_target", "move_pulse"])
+        self.assertIn("menu_transition_completed", plan_calls[1]["validation_error"])
+
     def test_dry_run_stops_before_dependent_menu_step_without_transition(self):
         with tempfile.TemporaryDirectory() as tmp:
             profile = GameProfile(game_id="minecraft", ui_adapters=["world_selection"],
