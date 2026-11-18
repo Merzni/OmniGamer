@@ -233,12 +233,15 @@ class GameMemory:
         from .perception import VisualAssessment
         from .supervision import PlaySupervisor
         first, second = event.get("first_check_id"), event.get("second_check_id")
-        if not first or not second or first == second or not event.get("verified_change"):
-            raise ValueError("A checked outcome needs two distinct visual checks")
+        if (not first or not second or first == second
+                or event.get("status") != "visual_confirmed"
+                or event.get("verified_change") is not True):
+            raise ValueError("A checked outcome needs a visual-confirmed pair of distinct checks")
         with self._connection() as conn:
-            checks = []
+            checks, provenance = [], []
             for check_id in (first, second):
-                row = conn.execute("SELECT game_id,goal_id,phase,assessment,error FROM visual_checks WHERE id=?",
+                row = conn.execute("SELECT game_id,goal_id,phase,assessment,error,session_id,step "
+                                   "FROM visual_checks WHERE id=?",
                                    (check_id,)).fetchone()
                 if not row or row[:3] != (game_id,"free_play","post") or row[4]:
                     raise ValueError("Visual checks must belong to this continuous-play profile")
@@ -246,6 +249,14 @@ class GameMemory:
                 if not assessment.usable or assessment.result != "progress":
                     raise ValueError("Uncertain/regressed outcomes cannot be confirmed")
                 checks.append(assessment)
+                provenance.append((row[5], row[6]))
+            first_session, first_step = provenance[0]
+            second_session, second_step = provenance[1]
+            if (not first_session or second_session != first_session
+                    or not isinstance(first_step, int) or not isinstance(second_step, int)
+                    or second_step <= first_step
+                    or event.get("candidate_step") != first_step):
+                raise ValueError("Play lesson checks must be from one session and a later step")
             if (PlaySupervisor._candidate(checks[0]) != event.get("change")
                     or not PlaySupervisor._still_visible(event["change"], checks[1].after)):
                 raise ValueError("Visual evidence does not support this outcome")

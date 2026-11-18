@@ -381,6 +381,36 @@ class ContinuousPlayTests(unittest.TestCase):
             self.assertIn("temporal association only; not proof of cause",context)
             with self.assertRaises(ValueError):memory.record_play_lesson(2,"another-game",event)
 
+    def test_play_lesson_write_rechecks_same_session_and_later_step(self):
+        with tempfile.TemporaryDirectory() as folder:
+            memory = GameMemory(Path(folder) / "memory.db")
+            first_assessment = VisualAssessment(
+                before=FrameFacts(scene="menu"), after=FrameFacts(scene="gameplay"),
+                confidence=.95, evidence="The screen entered gameplay.", result="progress")
+            second_assessment = VisualAssessment(
+                before=FrameFacts(scene="gameplay"), after=FrameFacts(scene="gameplay"),
+                confidence=.95, evidence="Gameplay remains visible on the later step.", result="progress")
+            cases = (("session-a", "session-b", 1, 2, 1),
+                     ("session-a", "session-a", 2, 2, 2),
+                     ("session-a", "session-a", 1, 2, 0))
+
+            for index, (first_session, second_session, first_step, second_step,
+                        candidate_step) in enumerate(cases):
+                with self.subTest(sessions=(first_session, second_session),
+                                  steps=(first_step, second_step), candidate_step=candidate_step):
+                    first = memory.record_visual_check(
+                        index * 2 + 1, "g", first_session, first_step, "post", "free_play",
+                        first_assessment.model_dump())
+                    second = memory.record_visual_check(
+                        index * 2 + 2, "g", second_session, second_step, "post", "free_play",
+                        second_assessment.model_dump())
+                    event = {"status": "visual_confirmed", "verified_change": True,
+                             "change": {"kind": "entered_gameplay"},
+                             "first_check_id": first, "second_check_id": second,
+                             "candidate_step": candidate_step}
+                    with self.assertRaisesRegex(ValueError, "one session and a later step"):
+                        memory.record_play_lesson(index * 2 + 2, "g", event)
+
     def test_malformed_stored_play_lesson_does_not_break_learning_context(self):
         with tempfile.TemporaryDirectory() as folder:
             memory = GameMemory(Path(folder) / "memory.db")

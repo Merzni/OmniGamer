@@ -348,3 +348,9 @@ TOCTOU review выявил, что `GoalPlanner` фильтровал gameplay-�
 ## Повторный live dry-run цели в меню (2026-11-18)
 
 Read-only doctor подтвердил VLM health/schema probe, detector health/probe (2 boxes, CUDA FP16) и захват Minecraft 1600×877 за 109.1 мс. Свежий `--goal "Добудь дерево" --dry-run` выбрал один шаг `click_menu_target` по «Одиночная игра» в состоянии `main_menu/default`; confidence 0.95, normalized `(530,438)`, screen `(848,407)`, grounding занял 42.485 с. Результат `DRY_RUN`, 1 шаг, 0/60 вводов. Это подтверждает только выбор menu-перехода текущим планировщиком; клик, загрузка мира и добыча не выполнялись. `OpenInputDesktop` отказал с WinError 5, поэтому live-ввод по-прежнему недоступен.
+
+## Запись play_lesson перепроверяет происхождение обоих check (2026-11-18)
+
+Проверка write boundary выявила, что `record_play_lesson()` доверял уже собранному supervisor event: два разных ID могли указывать на разные сессии или на один и тот же шаг, хотя `visual_checks` хранит `session_id` и `step`. Теперь SQLite writer требует `status=visual_confirmed`, точное `verified_change=True`, одну непустую сессию, возрастающий шаг второго check и `candidate_step`, совпадающий с первым check; прежние проверки пары usable `progress` и визуального содержания сохранены. Регрессия отвергает разные сессии, повтор шага и подменённый candidate step. Полный suite прошёл: 355 unittest при принудительно пустом runtime profile directory; `pyflakes` и `git diff --check` чисты.
+
+Свежий read-only doctor подтвердил VLM `/health` и JSON Schema probe, detector `/health` и OWLv2 inference на CUDA/FP16 (`boxes=2`), Minecraft 1600×877 и захват за 109.1 мс. Оба сервиса уже слушали `127.0.0.1:8081/8082`; повторный запуск не требовался. Windows отказал в `OpenInputDesktop` (WinError 5), `SendInput` не вызывался. Эта проверка не отправляла игровой ввод и не проверяла реальный игровой урок.
