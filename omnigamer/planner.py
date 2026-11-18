@@ -14,7 +14,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .config import config
 from .memory import GameMemory
 from .skills.contracts import SkillStatus
-from .ui_grounding import has_profile_menu_layout
+from .skills.menu import classify_menu_result
+from .ui_grounding import (button_candidates, has_profile_menu_layout,
+                           stacked_main_menu_layout)
 
 OUTCOME_SUCCESS_CODES = frozenset({
     "SUCCESS_VERIFIED", "TARGET_DETECTED", "APPROACH_REACHED", "CONDITION_MET",
@@ -289,8 +291,13 @@ class GoalPlanner:
                 properties["region"]["enum"] = sorted(profile.regions)
         return catalog
 
-    def validate(self, raw, profile=None, menu_visible=False):
+    def validate(self, raw, profile=None, menu_visible=False, frame=None):
         plan = raw if isinstance(raw, GoalPlan) else GoalPlan.model_validate(raw)
+        main_menu_layout = bool(
+            profile and frame is not None
+            and "world_selection" in (profile.ui_adapters or ())
+            and "stacked_main_menu" in (profile.ui_adapters or ())
+            and stacked_main_menu_layout(button_candidates(frame)))
         validated = []
         for step in plan.steps:
             if menu_visible and step.skill in MENU_UNSAFE_SKILLS:
@@ -307,6 +314,10 @@ class GoalPlanner:
                     raise ValueError("Skill 'click_menu_target' requires a profile UI adapter")
                 if values["expected_result"].strip().casefold() != step.expected_result.strip().casefold():
                     raise ValueError("click_menu_target expected_result must match the step postcondition")
+                if (main_menu_layout
+                        and classify_menu_result(values["expected_result"]) != "world_select"):
+                    raise ValueError(
+                        "click_menu_target from the recognized stacked main menu must expect the immediate world-selection screen")
             if profile and step.skill == "interact_until_change":
                 if not profile.actions or not profile.regions:
                     raise ValueError(f"Skill 'interact_until_change' requires configured actions and regions "
@@ -382,7 +393,7 @@ class GoalPlanner:
                 finally:
                     request_durations.append(max(0.0, time.monotonic() - request_started))
                 try:
-                    plan = self.validate(raw, profile=profile, menu_visible=menu_visible)
+                    plan = self.validate(raw, profile=profile, menu_visible=menu_visible, frame=frame)
                     signature = self.signature(plan, profile=profile)
                     if avoid_plan is not None and signature == avoid_plan:
                         raise ValueError("Plan exactly repeats the previous failed plan; choose a different strategy.")

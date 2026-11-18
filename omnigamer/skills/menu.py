@@ -11,7 +11,7 @@ from ..vision_brain import BrainDecision
 from .contracts import SkillResult, SkillStatus
 
 
-def _known_menu_result(value):
+def classify_menu_result(value):
     words = re.findall(r"[a-z0-9а-яё]+", str(value).casefold())
     text = " ".join(words)
     word_set = set(words)
@@ -42,7 +42,7 @@ def _menu_target_matches(requested, grounded, expected_result, profile):
     if localized in {"visible world row", "play selected world"}:
         if "world_selection" not in profile.ui_adapters:
             return False
-        result = _known_menu_result(expected_result)
+        result = classify_menu_result(expected_result)
         if (localized == "visible world row" and grounded.menu_id == "world_select"
                 and grounded.menu_state == "no_selection" and result == "world_selected"):
             return True
@@ -95,8 +95,8 @@ def click_menu_target(target_label, intent, expected_result, *, capture, control
     if (grounded.scene_type != "menu" or grounded.x is None or grounded.y is None
             or grounded.visual_confidence < 0.85 or not grounded.target_label.strip()):
         raise ValueError("Menu target was not confidently grounded on a verified menu")
-    requested_result = _known_menu_result(expected_result)
-    localized_result = _known_menu_result(grounded.expected_result)
+    requested_result = classify_menu_result(expected_result)
+    localized_result = classify_menu_result(grounded.expected_result)
     adapter_conflict = ("world_selection" in profile.ui_adapters
                         and grounded.menu_id == "world_select"
                         and localized_result is not None

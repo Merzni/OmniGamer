@@ -67,6 +67,30 @@ class GoalPlannerTests(unittest.TestCase):
         self.assertNotIn("click_menu_target", {
             item["name"] for item in planner._profile_catalog(self.profile)})
 
+    def test_stacked_main_menu_click_must_expect_immediate_world_selection(self):
+        profile = GameProfile(game_id="minecraft", ui_adapters=[
+            "world_selection", "stacked_main_menu"])
+        planner = GoalPlanner(default_registry(), lambda **_: None)
+        frame = Image.new("RGB", (800, 600))
+
+        def click_plan(expected_result):
+            return {"steps": [{
+                "skill": "click_menu_target",
+                "args": {"target_label": "Одиночная игра", "intent": "Open single-player",
+                         "expected_result": expected_result},
+                "expected_result": expected_result,
+                "success_check": "world selection screen is visible",
+            }]}
+
+        with patch("omnigamer.planner.stacked_main_menu_layout", return_value=True):
+            with self.assertRaisesRegex(ValueError, "immediate world-selection screen"):
+                planner.validate(click_plan("Game world loads into selected world"),
+                                 profile=profile, menu_visible=True, frame=frame)
+            accepted = planner.validate(click_plan("World selection screen appears"),
+                                        profile=profile, menu_visible=True, frame=frame)
+        self.assertEqual(accepted.steps[0].args["expected_result"],
+                         "World selection screen appears")
+
     def test_recognized_menu_filters_and_rejects_gameplay_interactions(self):
         profile = GameProfile(game_id="menu", camera_type="first_person",
                               ui_adapters=["stacked_main_menu"],
@@ -985,6 +1009,8 @@ class GoalPlannerTests(unittest.TestCase):
                                  skills=self.registry.planner_catalog())
         self.assertEqual(result, {"steps": []})
         payload = requests[0][1]["json"]
+        self.assertIn("immediate next visible screen/state after that one click",
+                      payload["messages"][0]["content"])
         self.assertEqual(payload["response_format"]["json_schema"]["name"], "GoalPlan")
         self.assertEqual(payload["response_format"]["json_schema"]["schema"]["properties"]["steps"]["maxItems"], 6)
         self.assertEqual(payload["max_tokens"], 256)
