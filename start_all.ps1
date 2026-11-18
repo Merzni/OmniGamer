@@ -97,13 +97,30 @@ $DetectorPython = $env:OMNIGAMER_DETECTOR_PYTHON
 if (-not $DetectorPython) { $DetectorPython = Join-Path $ProjectRoot '.venv\Scripts\python.exe' }
 if (-not (Test-Path -LiteralPath $DetectorPython)) { throw "Detector Python not found: $DetectorPython" }
 $DetectorPidFile = Join-Path $RuntimeDir 'detector.pid'
-if (-not (Test-Health 'http://127.0.0.1:8082/health') -and -not (Test-Path $DetectorPidFile)) {
-    $proc = Start-Process -FilePath $DetectorPython -ArgumentList @((Join-Path $ProjectRoot 'tools\detector_server.py'),
-        '--fp16') -WindowStyle Hidden -PassThru `
-        -RedirectStandardOutput (Join-Path $LogDir 'detector.stdout.log') `
-        -RedirectStandardError (Join-Path $LogDir 'detector.stderr.log') -WorkingDirectory $ProjectRoot
-    @{ pid = $proc.Id; executable = (Resolve-Path -LiteralPath $DetectorPython).Path } |
-        ConvertTo-Json | Set-Content -LiteralPath $DetectorPidFile -Encoding UTF8
+$DetectorScript = (Resolve-Path -LiteralPath (Join-Path $ProjectRoot 'tools\detector_server.py')).Path
+if (-not (Test-Health 'http://127.0.0.1:8082/health')) {
+    if (Test-Path -LiteralPath $DetectorPidFile) {
+        $record = $null
+        try { $record = Get-Content -LiteralPath $DetectorPidFile -Raw | ConvertFrom-Json }
+        catch { Write-Warning "Ignoring invalid detector PID metadata: $($_.Exception.Message)" }
+        $tracked = if ($record -and $record.pid) {
+            Get-CimInstance Win32_Process -Filter "ProcessId = $($record.pid)" -ErrorAction SilentlyContinue
+        } else { $null }
+        $owned = $tracked -and $tracked.ExecutablePath -eq $record.executable -and
+            $tracked.CommandLine -match [regex]::Escape($DetectorScript)
+        if (-not $owned) {
+            Remove-Item -LiteralPath $DetectorPidFile -Force
+            Write-Host 'Removed stale detector PID metadata.'
+        }
+    }
+    if (-not (Test-Path -LiteralPath $DetectorPidFile)) {
+        $proc = Start-Process -FilePath $DetectorPython -ArgumentList @($DetectorScript,
+            '--fp16') -WindowStyle Hidden -PassThru `
+            -RedirectStandardOutput (Join-Path $LogDir 'detector.stdout.log') `
+            -RedirectStandardError (Join-Path $LogDir 'detector.stderr.log') -WorkingDirectory $ProjectRoot
+        @{ pid = $proc.Id; executable = (Resolve-Path -LiteralPath $DetectorPython).Path } |
+            ConvertTo-Json | Set-Content -LiteralPath $DetectorPidFile -Encoding UTF8
+    }
 }
 Wait-Health 'Detector' 'http://127.0.0.1:8082/health'
 Write-Host 'OmniGamer services are ready. No game window or input was used.'

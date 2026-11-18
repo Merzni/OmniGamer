@@ -124,3 +124,9 @@
 ## Планировочный вызов CLI не был F12-interruptible (2026-11-18)
 
 Code review выявил неполную гарантию прежнего исправления: planner сохранял `ABORT` при получении `InterruptedError`, но CLI передавал `agent.brain.plan_goal` напрямую. Поэтому stop flag не прерывал ожидание настоящего HTTP-вызова, пока тот не завершался по сетевому timeout. `run_agent.py` теперь передаёт `agent.request_goal_plan`, а метод делегирует в `_call_interruptibly()`; инвариант single-flight применяется и к планированию. Проверки: регрессия с заблокированным fake plan возвращает `InterruptedError` менее чем за 0.5 с; CLI dry-run fixture проходит через новый callback; полный набор 359 unittest, `pyflakes`, `run_agent.py --help`, `git diff --check` прошли. Поведение настоящего F12 на активном Windows desktop во время HTTP-запроса не подтверждено.
+
+## Детектор не перезапускался при мёртвой PID-записи (2026-11-18)
+
+В `start_all.ps1` ветка detector требовала отсутствия `detector.pid`; в отличие от VLM, записанный PID не сверялся с существующим процессом. После падения дочернего service process launcher мог перейти к readiness timeout вместо восстановления. Теперь при нерабочем endpoint PID проверяется по существованию процесса, executable и command line ожидаемого `detector_server.py`; недействительная запись удаляется, после чего запускается штатный service. Live-процесс не останавливается при проверке.
+
+PowerShell parser прошёл. `start_all.ps1` подтвердил оба `/health` и повторный вызов не изменил listener PID. OWLv2 ответил на synthetic inference; VLM вернула ответ, прошедший production `GoalPlanner` validation. Обе проверки без игрового окна/ввода; stale-PID ветка в этом текущем runtime не активировалась, так как recorded parent и child процессы оказались живыми. Minecraft foreground/cursor gate всё ещё не позволяет провести live interaction.
