@@ -863,6 +863,28 @@ class GoalPlannerTests(unittest.TestCase):
             self.assertEqual(result["status"], "ABORT")
             self.assertEqual(len(planner_calls), 1)
 
+    def test_interrupted_skill_execution_becomes_recorded_abort(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SkillOutcomeStore(Path(tmp) / "outcomes.db")
+            logs = []
+            planner = GoalPlanner(self.registry, lambda **_: plan_for())
+
+            def interrupted_skill(*_):
+                raise InterruptedError("Emergency stop requested (F12)")
+
+            executor = GoalExecutor(planner, self.registry, store, profile=self.profile, game_id="sim",
+                execute_skill=interrupted_skill, frame_provider=lambda: object(),
+                stop_check=lambda: None, logger=logs.append, max_replans=0)
+
+            result = executor.run("move")
+
+            self.assertEqual(result["status"], "ABORT")
+            self.assertIn("Emergency stop requested", result["reason"])
+            self.assertEqual(store.summary("sim")[0]["successes"], 0)
+            skill_result = next(row["result"] for row in logs if row["event"] == "skill_result")
+            self.assertEqual(skill_result["result_code"], "ABORT")
+            self.assertEqual(skill_result["evidence"]["postcondition"], "not_checked_emergency_stop")
+
     def test_region_delta_is_unconfirmed_without_a_success_verifier(self):
         with tempfile.TemporaryDirectory() as temp:
             self.profile.actions = {"primary_hold": {"kind": "mouse", "value": "left"}}

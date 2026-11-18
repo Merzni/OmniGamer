@@ -593,8 +593,7 @@ class GoalExecutor:
             params = spec.validate_args(args).model_dump(mode="json")
             begin = self.clock()
             last_skill = name
-            last_result = self.execute_skill(spec, params, available)
-            last_result = last_result.model_dump() if hasattr(last_result, "model_dump") else last_result
+            last_result = self._execute_skill(spec, params, available, begin)
             duration = last_result.get("duration_seconds", max(0.0, self.clock() - begin))
             if name != "approach_target":
                 self.store.record(self.game_id, name, goal,
@@ -611,6 +610,18 @@ class GoalExecutor:
     def _current_state_hash(self):
         frame = self.frame_provider()
         return GameMemory.compute_state_hash(frame) if hasattr(frame, "convert") else None
+
+    def _execute_skill(self, spec, params, available, begin):
+        try:
+            result = self.execute_skill(spec, params, available)
+        except InterruptedError as exc:
+            evidence = {"postcondition": "not_checked_emergency_stop"}
+            if self.input_action_budget is not None:
+                evidence["input_actions"] = self.input_action_budget.actions_used
+            return {"status": "ABORT", "result_code": "ABORT",
+                    "reason": str(exc)[:300], "evidence": evidence,
+                    "duration_seconds": max(0.0, self.clock() - begin)}
+        return result.model_dump() if hasattr(result, "model_dump") else result
 
     def run(self, goal):
         started, steps_used, replans, failure = self.clock(), 0, 0, ""
@@ -742,8 +753,7 @@ class GoalExecutor:
                     verification_before = (step_frame if self.result_verifier and
                                            (step.skill in {"interact_until_change", "click_menu_target"} or is_final_step)
                                            else None)
-                    result = self.execute_skill(spec, params, available)
-                    result = result.model_dump() if hasattr(result, "model_dump") else result
+                    result = self._execute_skill(spec, params, available, begin)
                     verification_candidate = result.get("result_code") in {
                         "REGION_CHANGE_UNCONFIRMED", "SUCCESS_REGION_CHANGE",
                         "INTERACTION_OUTCOME_UNCONFIRMED", "MENU_ACTION_UNCONFIRMED"}

@@ -73,6 +73,8 @@
 
 | Menu dry-run терял статус аварийного прерывания при локализации | В `GoalExecutor.run()` общий `except Exception` для menu preview перехватывал `InterruptedError` от F12 и возвращал `UNCONFIRMED/MENU_TARGET_PREVIEW_FAILED` | Прерывание preview трактовалось как ошибка grounding | CLI неверно сообщал обычный отказ локализации вместо аварийного `ABORT` | P2 | Исправлено: `InterruptedError` преобразуется в `ABORT` и отдельное событие `menu_preview_aborted`; регрессия проверяет статус и отсутствие `would_send`. Полный набор: 336 unittest, pyflakes чист. Live ввод не выполнялся |
 
+| GoalExecutor терял структурированный исход при F12 во время выполнения навыка | Вызов `execute_skill()` в обычном шаге и локальном recovery не перехватывал `InterruptedError`; исключение выходило до `skill_result` и `SkillOutcomeStore.record()` | Emergency stop обрабатывался только если исполнитель сам вернул `SkillResult(ABORT)` | Goal-run завершался как ошибка верхнего уровня, без явного `ABORT` и записи прерванной попытки | P2 | Исправлено общим `_execute_skill()`: нормальные и recovery-навыки преобразуют исключение в `ABORT`, указывают, что постусловие не проверено, и сохраняют доступный счётчик вводов. Регрессия проверяет ABORT, telemetry и отсутствие успеха; полный набор: 337 unittest, pyflakes чист |
+
 ## Границы результатов
 
 - `approach_target` сообщает о геометрически подтверждённом приближении, а не о добыче или получении предмета.
