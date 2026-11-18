@@ -45,12 +45,16 @@ class FakeAgent:
         self.telemetry.meta = {"run_id": "run-cli"}
         self.emergency_hotkey = FakeHotkey()
         self.ended = None
+        self.goal_plan_requests = 0
         self.profile = kwargs["profile"]
         self.game_id = "game:" + self.profile.game_id
         FakeAgent.instance = self
     def plan_goal(self, **kwargs):
         return {"steps": [{"skill": "search_target", "args": {"target_text": "target", "sweep": 2},
                            "expected_result": "target detected", "success_check": "detector result"}]}
+    def request_goal_plan(self, **kwargs):
+        self.goal_plan_requests += 1
+        return self.plan_goal(**kwargs)
     def begin_telemetry_run(self):
         return None
     def start_emergency_hotkey(self):
@@ -84,6 +88,7 @@ class CliGoalDryRunTests(unittest.TestCase):
             self.assertEqual(instance.db_path, ":memory:")
             self.assertEqual(instance.controls.releases, 0)
             self.assertEqual(instance.ended, "dry_run")
+            self.assertEqual(instance.goal_plan_requests, 1)
             self.assertIn("would send", stdout.getvalue())
             events = [json.loads(line) for line in (runs / "run-cli" / "goal_steps.jsonl").read_text(
                 encoding="utf-8").splitlines()]

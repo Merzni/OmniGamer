@@ -179,6 +179,27 @@ class EmergencyHotkeyTests(unittest.TestCase):
         self.assertTrue(agent._vlm_request_active.wait(1))
         self.assertIs(agent._call_interruptibly(lambda: "next request"), "next request")
 
+    def test_f12_interrupts_goal_planning_request(self):
+        agent = OmniAgent.__new__(OmniAgent)
+        agent._stop_event = threading.Event()
+        agent._stop_reason = None
+        agent._vlm_request_lock = threading.Lock()
+        agent._vlm_request_active = None
+        started = threading.Event()
+
+        def blocked_plan(**_kwargs):
+            started.set()
+            threading.Event().wait(2)
+
+        agent.brain = type("Brain", (), {"plan_goal": staticmethod(blocked_plan)})()
+        timer = threading.Thread(target=lambda: (started.wait(1), agent._stop_event.set()), daemon=True)
+        timer.start()
+
+        begin = time.perf_counter()
+        with self.assertRaises(InterruptedError):
+            agent.request_goal_plan(goal="test", timeout_seconds=60)
+        self.assertLess(time.perf_counter() - begin, 0.5)
+
 
 if __name__ == "__main__":
     unittest.main()

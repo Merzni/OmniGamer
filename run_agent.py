@@ -132,7 +132,7 @@ def main():
 
                 registry = default_registry(profile=profile)
                 detector = DetectorClient()
-                planner = GoalPlanner(registry, agent.brain.plan_goal)
+                planner = GoalPlanner(registry, agent.request_goal_plan)
                 outcome_store = SkillOutcomeStore(":memory:" if args.dry_run else agent.memory.db_path)
                 input_action_budget = InputActionBudget(profile.motion_limits.max_actions)
                 def execute_skill(spec, skill_args, remaining_seconds=None):

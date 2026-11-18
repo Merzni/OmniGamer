@@ -211,6 +211,10 @@ class OmniAgent:
             raise result["error"]
         return result.get("value")
 
+    def request_goal_plan(self, **kwargs):
+        """Run goal planning through the same F12-interruptible path as other VLM calls."""
+        return self._call_interruptibly(self.brain.plan_goal, **kwargs)
+
     def begin_telemetry_run(self):
         try:
             title = self.capture.get_window_title()
