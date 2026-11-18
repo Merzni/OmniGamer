@@ -178,6 +178,33 @@ class GoalPlannerTests(unittest.TestCase):
         self.assertNotIn("turn", offered)
         self.assertIn("click_menu_target", offered)
 
+    def test_known_menu_label_wait_cannot_be_followed_by_gameplay_interaction(self):
+        profile = GameProfile(game_id="minecraft", camera_type="first_person",
+            ui_adapters=["world_selection", "stacked_main_menu"],
+            main_menu_target_transitions={"Одиночная игра": "world_select"},
+            actions={"interact": {"kind": "mouse", "value": "right"}},
+            regions={"hotbar": {"x1": 0.3, "y1": 0.9, "x2": 0.7, "y2": 1}})
+        calls = []
+        bad_plan = {"steps": [
+            {"skill": "wait_for_condition", "args": {
+                "timeout": 2, "query": "Одиночная игра", "present": True},
+                "expected_result": "MENU_VISIBLE", "success_check": "Menu row visible"},
+            {"skill": "interact_until_change", "args": {
+                "region": "hotbar", "action": "interact", "max_repeats": 1},
+                "expected_result": "PLAY_SELECTED", "success_check": "Play button highlighted"},
+        ]}
+        safe_plan = {"steps": [bad_plan["steps"][0]]}
+        planner = GoalPlanner(self.registry,
+            lambda **request: calls.append(request) or (bad_plan if len(calls) == 1 else safe_plan),
+            max_validation_retries=1)
+
+        accepted = planner.plan(frame=None,
+            goal="Inspect the title menu; do not enter a world", profile=profile)
+
+        self.assertEqual([step.skill for step in accepted.steps], ["wait_for_condition"])
+        self.assertEqual(len(calls), 2)
+        self.assertIn("visible configured menu target", calls[1]["validation_error"])
+
     def test_pre_execution_menu_recheck_replans_stale_gameplay_skill(self):
         profile = GameProfile(game_id="minecraft", camera_type="first_person",
             ui_adapters=["world_selection", "stacked_main_menu"],

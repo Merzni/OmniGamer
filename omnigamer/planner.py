@@ -300,6 +300,22 @@ class GoalPlanner:
             and "world_selection" in (profile.ui_adapters or ())
             and "stacked_main_menu" in (profile.ui_adapters or ())
             and stacked_main_menu_layout(button_candidates(frame)))
+        menu_targets = {
+            normalize_menu_label(label)
+            for label in (getattr(profile, "main_menu_target_transitions", {}) or {})
+        }
+        if menu_targets:
+            for index, step in enumerate(plan.steps[:-1]):
+                if step.skill != "wait_for_condition":
+                    continue
+                wait_args = self.registry.get(step.skill).validate_args(step.args).model_dump()
+                if (not wait_args.get("present", True)
+                        or normalize_menu_label(wait_args.get("query", "")) not in menu_targets):
+                    continue
+                if any(later.skill in MENU_UNSAFE_SKILLS for later in plan.steps[index + 1:]):
+                    raise ValueError(
+                        "A visible configured menu target was detected by the plan; "
+                        "gameplay skills cannot follow it without a fresh menu-grounded plan")
         validated = []
         for step in plan.steps:
             if menu_visible and step.skill in MENU_UNSAFE_SKILLS:
