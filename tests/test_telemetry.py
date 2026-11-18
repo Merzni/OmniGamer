@@ -65,6 +65,58 @@ class TelemetryTests(unittest.TestCase):
         self.assertEqual(rows[1]["result"]["status"], "SUCCESS")
         self.assertIn("move_pulse: SUCCESS: 1", summarize(Run.directory))
 
+    def test_goal_approach_recorder_saves_bounded_frame_pairs_without_collisions(self):
+        telemetry = self.recorder()
+        run_dir = Path(telemetry.start({"game_id": "game:fake"}))
+        result = SkillResult(status=SkillStatus.FAILED, result_code="FAILED", reason="target lost")
+        for index in range(2):
+            recorder = SkillStepRecorder(telemetry, "approach_target", {"target_text": "target"})
+            recorder({"state": "LOST", "action": {"type": "search_look"}},
+                     Image.new("RGB", (800, 400), (index * 80, 0, 0)),
+                     Image.new("RGB", (800, 400), (0, index * 80, 0)))
+            recorder.finish(result)
+
+        rows = [json.loads(line) for line in (run_dir / "skill_steps.jsonl").read_text(
+            encoding="utf-8").splitlines()]
+        steps = [row for row in rows if row.get("event") == "step"]
+        for row in steps:
+            refs = row["frames"]
+            self.assertEqual(set(refs), {"before", "after"})
+            for relative in refs.values():
+                with Image.open(run_dir / relative) as image:
+                    self.assertLessEqual(max(image.size), 640)
+        self.assertEqual(len({tuple(sorted(row["frames"].values())) for row in steps}), 2)
+        self.assertEqual(len(list((run_dir / "frames").glob("*.jpg"))), 4)
+        telemetry.finish("single_step")
+
+    def test_goal_approach_frame_saving_obeys_shared_run_size_limit(self):
+        telemetry = self.recorder(frames_max_mb=0.0001)
+        run_dir = Path(telemetry.start({"game_id": "game:fake"}))
+        recorder = SkillStepRecorder(telemetry, "approach_target", {"target_text": "target"})
+        recorder({"state": "ADVANCE"}, Image.new("RGB", (640, 640), "navy"),
+                 Image.new("RGB", (640, 640), "gray"))
+
+        self.assertTrue(telemetry.frames_disabled)
+        self.assertEqual(list((run_dir / "frames").glob("*.jpg")), [])
+        recorder.finish(SkillResult(status=SkillStatus.FAILED, result_code="FAILED", reason="limit"))
+        telemetry.finish("single_step")
+
+    def test_goal_approach_frame_write_error_keeps_skill_jsonl(self):
+        telemetry = self.recorder()
+        run_dir = Path(telemetry.start({"game_id": "game:fake"}))
+        recorder = SkillStepRecorder(telemetry, "approach_target", {"target_text": "target"})
+        with patch.object(recorder, "_save_approach_frames", side_effect=OSError("synthetic disk error")):
+            recorder({"state": "LOST"}, Image.new("RGB", (32, 32), "navy"),
+                     Image.new("RGB", (32, 32), "gray"))
+
+        rows = [json.loads(line) for line in (run_dir / "skill_steps.jsonl").read_text(
+            encoding="utf-8").splitlines()]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["step_state"], "LOST")
+        self.assertNotIn("frames", rows[0])
+        recorder.finish(SkillResult(status=SkillStatus.FAILED, result_code="FAILED", reason="disk"))
+        telemetry.finish("single_step")
+
     def test_camera_actions_pause_no_effect_streak_and_count_separately(self):
         no_effect, camera_only = 4, 0
         no_effect, camera_only = StepTrace.update_loop_streaks(

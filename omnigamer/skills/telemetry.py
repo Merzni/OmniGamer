@@ -3,6 +3,7 @@ import json
 import logging
 from io import BytesIO
 from pathlib import Path
+from uuid import uuid4
 
 from PIL import Image, ImageDraw
 
@@ -16,10 +17,43 @@ class SkillStepRecorder:
         self.telemetry = run_telemetry
         self.directory = Path(run_telemetry.directory)
         self.directory.mkdir(parents=True, exist_ok=True)
+        self.frames_dir = self.directory / "frames"
+        self.frames_dir.mkdir(exist_ok=True)
         self.steps_file = (self.directory / "skill_steps.jsonl").open("a", encoding="utf-8", buffering=1)
         self.skill_name = str(skill_name)
         self.args = args or {}
         self._step = 0
+        self._frame_prefix = uuid4().hex[:8]
+
+    def _save_approach_frames(self, before, after):
+        if self.skill_name != "approach_target" or self.telemetry.frames_disabled:
+            return None
+        encoded = []
+        for label, frame in (("before", before), ("after", after)):
+            if frame is None:
+                continue
+            image = frame.convert("RGB").copy()
+            image.thumbnail((640, 640), Image.Resampling.LANCZOS)
+            buffer = BytesIO()
+            image.save(buffer, format="JPEG", quality=80)
+            encoded.append((label, buffer.getvalue()))
+        if not encoded:
+            return None
+        current_size = sum(path.stat().st_size for path in self.frames_dir.glob("*.jpg"))
+        if current_size + sum(len(blob) for _, blob in encoded) > self.telemetry.frames_max_bytes:
+            self.telemetry.frames_disabled = True
+            if not self.telemetry.frame_limit_warned:
+                self.telemetry.frame_limit_warned = True
+                self.telemetry._warn_once(
+                    "frame_limit", "frames size limit reached; further frame saving disabled")
+            return None
+        result = {}
+        for label, blob in encoded:
+            path = self.frames_dir / (
+                f"skill_approach_target_{self._frame_prefix}_{self._step:06d}_{label}.jpg")
+            path.write_bytes(blob)
+            result[label] = str(path.relative_to(self.directory))
+        return result
 
     def __call__(self, row, before=None, after=None):
         self._step += 1
@@ -34,6 +68,13 @@ class SkillStepRecorder:
         normalized["step_evidence"] = normalized.pop("evidence", {})
         normalized.pop("result", None)
         normalized.setdefault("result", None)
+        try:
+            frame_refs = self._save_approach_frames(before, after)
+        except Exception as exc:
+            logger.warning("Skill frame write failed (%s): %s", type(exc).__name__, exc)
+            frame_refs = None
+        if frame_refs is not None:
+            normalized["frames"] = frame_refs
         try:
             self.steps_file.write(json.dumps(normalized, ensure_ascii=False, separators=(",", ":")) + "\n")
             self.steps_file.flush()
