@@ -57,10 +57,10 @@ class GoalPlannerTests(unittest.TestCase):
             motion_limits={"max_run_seconds": 20, "max_actions": 3})
 
     @staticmethod
-    def _mining_assessment(*, target=True):
+    def _mining_assessment(*, target=True, confidence=0.95):
         facts = FrameFacts(scene="gameplay", pitch="level", safe_footing=True,
                            target_at_crosshair=target)
-        return VisualAssessment(before=facts, after=facts, result="unknown", confidence=0.95,
+        return VisualAssessment(before=facts, after=facts, result="unknown", confidence=confidence,
                                 evidence="Current frame shows the mining safety facts.")
 
     def test_rejects_unknown_skill_and_invalid_arguments(self):
@@ -727,6 +727,28 @@ class GoalPlannerTests(unittest.TestCase):
                              "MINING_PREFLIGHT_UNCONFIRMED")
             self.assertIn("target_at_crosshair_unconfirmed",
                           preflight["result"]["evidence"]["unknown_conditions"])
+
+    def test_profiled_mining_rejects_low_confidence_positive_target_fact(self):
+        with tempfile.TemporaryDirectory() as temp:
+            profile = self._mining_profile()
+            frame = Image.new("RGB", (16, 16), (30, 40, 50))
+            sends = []
+            logs = []
+            runner = GoalExecutor(
+                GoalPlanner(self.registry, lambda **_: self._mining_plan()), self.registry,
+                SkillOutcomeStore(Path(temp) / "outcomes.db"), profile=profile, game_id="sim",
+                execute_skill=lambda *args: sends.append(args), frame_provider=lambda: frame,
+                stop_check=lambda: None, logger=logs.append, max_replans=0,
+                skill_preflight=lambda *_: self._mining_assessment(target=True, confidence=0.4))
+
+            runner.run("collect a visible log")
+
+            self.assertEqual(sends, [])
+            preflight = next(row for row in logs if row["event"] == "skill_preflight")
+            self.assertEqual(preflight["result"]["result_code"],
+                             "MINING_PREFLIGHT_UNCONFIRMED")
+            self.assertEqual(preflight["result"]["evidence"]["confidence"], 0.4)
+            self.assertTrue(preflight["result"]["evidence"]["facts"]["target_at_crosshair"])
 
     def test_profiled_mining_rejects_stale_facts_before_input(self):
         with tempfile.TemporaryDirectory() as temp:
