@@ -537,17 +537,25 @@ class VisionBrain:
                 logger.error("Fallback in VisionBrain.assess at %s (%s): %s", __name__, type(exc).__name__, exc,
                              exc_info=True)
                 return VisualAssessment(uncertainty=self.last_assessment_error[:300])
-        row = (first_world_row(before) if world_adapter
-               and action.get("expected_result") == "world_selected" else None)
+        check_world_selection = (world_adapter
+                                 and action.get("expected_result") == "world_selected")
+        before_boxes = button_candidates(before) if check_world_selection else None
+        before_state = (world_selection_cues(before, before_boxes)
+                        if before_boxes is not None else None)
+        row = (first_world_row(before, before_boxes, before_state)
+               if check_world_selection else None)
         try:
             click_x, click_y = float(action.get("x")), float(action.get("y"))
         except (TypeError, ValueError):
             click_x = click_y = -1
+        after_state = None
         if (is_menu and row and action.get("action_type") in {"click", "double_click"}
                 and row[0] <= click_x <= row[2]
                 and row[1] <= click_y <= row[3]
-                and world_selection_cues(before) == (False, False)
-                and world_selection_cues(after) == (True, True)):
+                and before_state == (False, False)):
+            after_boxes = button_candidates(after)
+            after_state = world_selection_cues(after, after_boxes)
+        if after_state == (True, True):
             # The profile geometry already proves the transition. Keep the
             # independent after-state inspection, but skip the redundant full
             # before/after VLM comparison for this narrowly recognized layout.
@@ -707,8 +715,11 @@ class VisionBrain:
         response.raise_for_status()
         view=MenuView.model_validate_json(response.json()["choices"][0]["message"]["content"])
         facts=view.facts
+        geometry_cues=None
         if facts.menu_id=="world_select" and adapter:
-            selection,play=world_selection_cues(frame)
+            boxes=button_candidates(frame)
+            geometry_cues=world_selection_cues(frame,boxes)
+            selection,play=geometry_cues
             if selection is not None:facts.selection_visible=selection
             if play is not None:facts.play_enabled=play
             if facts.play_enabled is False or facts.selection_visible is False:facts.menu_state="no_selection"
@@ -716,7 +727,7 @@ class VisionBrain:
             else:facts.menu_state="unknown_selection"
         return VisualAssessment(before=facts,after=facts.model_copy(),confidence=view.confidence,evidence=view.evidence,
             evidence_source="visual_model_with_geometry" if adapter and facts.menu_id=="world_select" and
-            world_selection_cues(frame)!=(None,None) else "visual_model")
+            geometry_cues!=(None,None) else "visual_model")
 
     def _assessment_format(self,is_menu):
         result=self._response_format(VisualAssessment,required=[

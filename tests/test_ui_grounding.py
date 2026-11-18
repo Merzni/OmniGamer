@@ -202,9 +202,12 @@ class GroundingTests(unittest.TestCase):
         inspection={'facts':{'scene':'menu','menu_id':'world_select','menu_state':'world_selected',
                             'selection_visible':True,'play_enabled':True},'confidence':.95,'evidence':'A row outline is visible.'}
         response=Mock();response.json.return_value={'choices':[{'message':{'content':json.dumps(inspection)}}]}
-        with patch('omnigamer.vision_brain.requests.post',return_value=response) as post:
+        with patch('omnigamer.vision_brain.button_candidates',wraps=button_candidates) as candidates, \
+             patch('omnigamer.vision_brain.requests.post',return_value=response) as post:
             result=self.brain.assess(before,after,action.model_dump(),'Free play',timeout_seconds=60)
         self.assertEqual(post.call_count,1)
+        self.assertEqual(sum(call.args[0] is before for call in candidates.call_args_list),1)
+        self.assertEqual(sum(call.args[0] is after for call in candidates.call_args_list),2)
         self.assertGreater(post.call_args.kwargs['timeout'],50)
         self.assertLessEqual(post.call_args.kwargs['timeout'],60)
         self.assertTrue(result.menu_action_succeeded)
