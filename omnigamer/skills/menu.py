@@ -77,7 +77,7 @@ def _target_patch(frame, x, y):
 
 
 def click_menu_target(target_label, intent, expected_result, *, capture, controls, profile, grounder,
-                      prepare_target, check_target, stop_check=None, recorder=None):
+                      prepare_target, check_target, stop_check=None, recorder=None, preview_only=False):
     """Ground a requested label on the current menu, then send exactly one click."""
     started = time.monotonic()
     if not profile.ui_adapters:
@@ -128,6 +128,24 @@ def click_menu_target(target_label, intent, expected_result, *, capture, control
         raise RuntimeError("Menu target changed during localization; click cancelled")
     check_target()
     screen_x, screen_y = capture.norm_to_screen(grounded.x, grounded.y)
+    if preview_only:
+        return SkillResult(
+            status=SkillStatus.UNCONFIRMED,
+            result_code="TARGET_GROUNDED_PREVIEW",
+            reason="dry_run_no_input",
+            duration_seconds=max(0.0, time.monotonic() - started),
+            evidence={
+                "target_label": grounded.target_label,
+                "expected_result": grounded.expected_result,
+                "menu_id": grounded.menu_id,
+                "menu_state": grounded.menu_state,
+                "visual_confidence": grounded.visual_confidence,
+                "normalized_target": [grounded.x, grounded.y],
+                "screen_target": [screen_x, screen_y],
+                "input_actions": 0,
+                "postcondition": "not_checked_no_action_sent",
+            },
+        )
     controls.click(screen_x, screen_y, button="left", hold_time=0.08)
     if stop_check:
         stop_check()

@@ -190,6 +190,23 @@ def main():
                         return spec.executor(skill_args, **shared)
                     return spec.executor(skill_args, **shared)
 
+                def preview_menu_target(step, frame, remaining_seconds):
+                    from omnigamer.skills.menu import click_menu_target
+                    deadline = time.monotonic() + max(0.0, remaining_seconds)
+                    def bounded_grounder(current_frame, decision):
+                        remaining = max(0.05, deadline - time.monotonic())
+                        return agent._call_interruptibly(
+                            agent.brain.ground_click, current_frame, decision, profile=profile,
+                            timeout_seconds=remaining)
+                    def require_visible_window():
+                        # Dry-run must never foreground the game window or send input.
+                        agent.prepare_target(focus=False)
+                    return click_menu_target(
+                        **step.args, capture=agent.capture, controls=None, profile=profile,
+                        grounder=bounded_grounder, prepare_target=require_visible_window,
+                        check_target=agent.capture.assert_visible, stop_check=agent._check_stop,
+                        preview_only=True)
+
                 agent.start_emergency_hotkey()
                 def record_goal_event(row):
                     directory = getattr(agent.telemetry, "directory", None)
@@ -219,6 +236,7 @@ def main():
                     input_action_budget=None if args.dry_run else input_action_budget,
                     result_verifier=verify_skill_result,
                     logger=record_goal_event, detector=detector,
+                    menu_preview=preview_menu_target if args.dry_run and not args.frame_dir else None,
                 )
                 try:
                     result = executor.run(args.goal)

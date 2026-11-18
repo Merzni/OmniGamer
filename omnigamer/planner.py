@@ -436,7 +436,7 @@ class GoalExecutor:
                  execute_skill, frame_provider, stop_check, dry_run=False,
                  max_replans=None, max_steps=None, input_action_budget=None,
                  run_id=None, clock=time.monotonic, result_verifier=None,
-                 logger=None, detector=None):
+                 logger=None, detector=None, menu_preview=None):
         self.planner, self.registry, self.store = planner, registry, outcome_store
         self.profile, self.game_id = profile, game_id
         self.execute_skill, self.frame_provider, self.stop_check = execute_skill, frame_provider, stop_check
@@ -446,6 +446,7 @@ class GoalExecutor:
         self.input_action_budget = input_action_budget
         self.result_verifier = result_verifier
         self.run_id, self.clock, self.logger, self.detector = run_id or uuid4().hex, clock, logger, detector
+        self.menu_preview = menu_preview
         self.memory_reuse_count = 0
 
     @staticmethod
@@ -676,6 +677,23 @@ class GoalExecutor:
                     params["timeout"] = min(params["timeout"], available)
                 if self.dry_run:
                     resolved = {"skill": step.skill, "args": params}
+                    preview_failed = False
+                    if step.skill == "click_menu_target" and self.menu_preview is not None:
+                        try:
+                            preview = self.menu_preview(step, step_frame, available)
+                            preview = preview.model_dump(mode="json") if hasattr(preview, "model_dump") else preview
+                            if not isinstance(preview, dict) or preview.get("result_code") != "TARGET_GROUNDED_PREVIEW":
+                                raise ValueError("Menu preview did not return a grounded target")
+                            resolved["grounded_target"] = preview
+                        except Exception as exc:
+                            preview_failed = True
+                            result = {"status": SkillStatus.UNCONFIRMED.value,
+                                      "result_code": "MENU_TARGET_PREVIEW_FAILED",
+                                      "reason": f"menu_target_not_grounded: {type(exc).__name__}: {exc}"[:300],
+                                      "duration_seconds": max(0.0, self.clock() - begin)}
+                            if self.logger:
+                                self.logger({"event": "menu_preview_failed", "skill": step.skill,
+                                             "reason": result["reason"]})
                     if step.skill == "move_pulse":
                         resolved["key"] = self.profile.move_keys[params["direction"]]
                     elif step.skill == "interact_until_change":
@@ -703,11 +721,12 @@ class GoalExecutor:
                             except Exception as exc:
                                 resolved["detector"] = {"query": query, "available": False,
                                     "error": type(exc).__name__}
-                    result = {"status": "SUCCESS", "result_code": "WOULD_SEND",
-                              "reason": "dry_run", "evidence": {"would_send": {"skill": step.skill,
-                              "args": params, "resolved": resolved}}, "duration_seconds": 0.0}
-                    if self.logger:
-                        self.logger({"event": "would_send", **resolved})
+                    if not preview_failed:
+                        result = {"status": "SUCCESS", "result_code": "WOULD_SEND",
+                                  "reason": "dry_run", "evidence": {"would_send": {"skill": step.skill,
+                                  "args": params, "resolved": resolved}}, "duration_seconds": 0.0}
+                        if self.logger:
+                            self.logger({"event": "would_send", **resolved})
                 else:
                     verification_before = (step_frame if self.result_verifier and
                                            (step.skill in {"interact_until_change", "click_menu_target"} or is_final_step)
@@ -748,6 +767,9 @@ class GoalExecutor:
                     self.logger({"event": "skill_result", "skill": step.skill,
                                  "args": step.args, "result": result})
                 steps_used += 1
+                if result.get("result_code") == "MENU_TARGET_PREVIEW_FAILED":
+                    return self._finish({"status": SkillStatus.UNCONFIRMED.value,
+                                         "reason": result["reason"], "steps": steps_used})
                 if result.get("reason") == "goal_result_unverified":
                     return self._finish({"status": SkillStatus.UNCONFIRMED.value,
                                          "reason": result["reason"], "steps": steps_used})

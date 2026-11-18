@@ -38,6 +38,18 @@ class MenuSkillTests(unittest.TestCase):
         self.assertEqual(result.evidence["input_actions"], 1)
         self.assertEqual(result.evidence["postcondition"], "pending_visual_verification")
 
+    def test_preview_grounds_and_rechecks_target_without_sending_input(self):
+        prepare, check = Mock(), Mock()
+        result = click_menu_target("Одиночная игра", "Open the world list", "World selection screen appears",
+            capture=self.capture, controls=None, profile=self.profile,
+            grounder=Mock(return_value=self.grounded), prepare_target=prepare, check_target=check,
+            preview_only=True)
+        self.assertEqual(result.result_code, "TARGET_GROUNDED_PREVIEW")
+        self.assertEqual(result.evidence["input_actions"], 0)
+        self.assertEqual(result.evidence["normalized_target"], [410, 520])
+        self.assertEqual(prepare.call_count, 2)
+        check.assert_called_once()
+
     def test_non_menu_grounding_sends_no_input(self):
         unsafe = self.grounded.model_copy(update={"scene_type": "unknown"})
         with self.assertRaisesRegex(ValueError, "not confidently grounded"):

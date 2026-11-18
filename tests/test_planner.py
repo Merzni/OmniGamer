@@ -586,6 +586,60 @@ class GoalPlannerTests(unittest.TestCase):
             self.assertEqual(calls, [])
             self.assertEqual(logs[1]["event"], "would_send")
 
+    def test_dry_run_menu_uses_read_only_target_preview(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = GameProfile(game_id="minecraft", ui_adapters=["world_selection"],
+                motion_limits={"max_run_seconds": 20, "max_actions": 3})
+            args = {"target_label": "Одиночная игра", "intent": "Open world list",
+                    "expected_result": "World selection screen appears"}
+            plan = {"steps": [{"skill": "click_menu_target", "args": args,
+                "expected_result": "World selection screen appears",
+                "success_check": "world selection menu is visible"}]}
+            planner = GoalPlanner(default_registry(profile), lambda **_: plan)
+            frame = Image.new("RGB", (800, 600))
+            preview = Mock(return_value={"result_code": "TARGET_GROUNDED_PREVIEW",
+                                         "evidence": {"target_label": "Одиночная игра",
+                                                      "input_actions": 0}})
+            logs = []
+            executor = GoalExecutor(planner, default_registry(profile),
+                SkillOutcomeStore(Path(tmp) / "outcomes.db"), profile=profile, game_id="minecraft",
+                execute_skill=lambda *_: self.fail("dry-run executed input skill"),
+                frame_provider=lambda: frame, stop_check=lambda: None,
+                dry_run=True, logger=logs.append, menu_preview=preview)
+
+            result = executor.run("Добудь дерево")
+
+            self.assertEqual(result["status"], "DRY_RUN")
+            preview.assert_called_once()
+            would_send = next(row for row in logs if row["event"] == "would_send")
+            self.assertEqual(would_send["grounded_target"]["evidence"]["input_actions"], 0)
+
+    def test_dry_run_menu_preview_failure_never_reports_would_send(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = GameProfile(game_id="minecraft", ui_adapters=["world_selection"],
+                motion_limits={"max_run_seconds": 20, "max_actions": 3})
+            args = {"target_label": "Одиночная игра", "intent": "Open world list",
+                    "expected_result": "World selection screen appears"}
+            plan = {"steps": [{"skill": "click_menu_target", "args": args,
+                "expected_result": "World selection screen appears",
+                "success_check": "world selection menu is visible"}]}
+            planner = GoalPlanner(default_registry(profile), lambda **_: plan)
+            frame = Image.new("RGB", (800, 600))
+            logs = []
+            executor = GoalExecutor(planner, default_registry(profile),
+                SkillOutcomeStore(Path(tmp) / "outcomes.db"), profile=profile, game_id="minecraft",
+                execute_skill=lambda *_: self.fail("dry-run executed input skill"),
+                frame_provider=lambda: frame, stop_check=lambda: None,
+                dry_run=True, logger=logs.append,
+                menu_preview=lambda *_: (_ for _ in ()).throw(ValueError("target unreadable")))
+
+            result = executor.run("Добудь дерево")
+
+            self.assertEqual(result["status"], SkillStatus.UNCONFIRMED.value)
+            self.assertIn("target unreadable", result["reason"])
+            self.assertFalse(any(row["event"] == "would_send" for row in logs))
+            self.assertTrue(any(row["event"] == "menu_preview_failed" for row in logs))
+
     def test_goal_telemetry_counts_only_exact_verified_example_reuse_for_same_goal(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = SkillOutcomeStore(Path(tmp) / "outcomes.db")
