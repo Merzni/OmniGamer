@@ -331,9 +331,14 @@ class GoalPlanner:
             return values
 
         def normalize(text):
-            return " ".join(str(text).casefold().split()).strip(" .,!?:;")
+            normalized = " ".join(str(text).casefold().split()).strip(" .,!?:;")
+            for article in ("a ", "an ", "the "):
+                if normalized.startswith(article):
+                    return normalized[len(article):]
+            return normalized
 
         target = normalize(values[field])
+        values[field] = target
         for label, synonyms in (profile.detector_queries or {}).items():
             canonical = normalize(label.replace("_", " "))
             aliases = {normalize(alias) for alias in synonyms}

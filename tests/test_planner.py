@@ -208,6 +208,20 @@ class GoalPlannerTests(unittest.TestCase):
             self.assertEqual(executions, ["tree trunk", "rock"])
             self.assertIn("exactly repeats", requests[2]["validation_error"])
 
+    def test_plan_signature_ignores_leading_english_article_in_target(self):
+        self.profile.detector_queries = {"tree_trunk": ["tree trunk"]}
+        planner = GoalPlanner(self.registry, lambda **_: None)
+
+        def signature(target):
+            plan = GoalPlan.model_validate({"steps": [{
+                "skill": "approach_target", "args": {"target_text": target},
+                "expected_result": "target reached", "success_check": "aligned",
+            }]})
+            return planner.signature(plan, profile=self.profile)
+
+        self.assertEqual(signature("tree trunk"), signature("the tree trunk"))
+        self.assertEqual(signature("an oak"), signature("oak"))
+
     def test_profile_actions_and_regions_are_schema_constrained(self):
         self.profile.actions = {"primary_hold": {"kind": "mouse", "value": "left"},
                                 "interact": {"kind": "mouse", "value": "right"}}
