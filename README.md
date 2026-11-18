@@ -44,7 +44,9 @@
 
 Рекомендуемый запуск обоих сервисов: задайте переменные окружения `OMNIGAMER_LLAMA_SERVER`,
 `OMNIGAMER_VLM_MODEL`, `OMNIGAMER_VLM_PROJECTOR`; для отдельного окружения детектора задайте
-`OMNIGAMER_DETECTOR_PYTHON`. Запустите `start_all.bat`. Скрипт ожидает `/health`, PID-метаданные
+`OMNIGAMER_DETECTOR_PYTHON`. Для CUDA-сборки можно задать `OMNIGAMER_LLAMA_DEVICE=CUDA0` и,
+если runtime DLL не лежат рядом с бинарником, `OMNIGAMER_CUDA_DLL_DIR`. Запустите `start_all.bat`.
+Скрипт ожидает `/health`, PID-метаданные
 пишет в `data/runtime/`, журналы — в `data/logs/`. `stop_all.bat` завершает только процессы с
 совпавшей командой/исполняемым файлом. Скрипты не открывают игру и не отправляют ввод.
 
