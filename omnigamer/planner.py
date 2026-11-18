@@ -335,6 +335,9 @@ class GoalPlanner:
                     mapped_transition = next((transition for label, transition in
                                               profile.main_menu_target_transitions.items()
                                               if normalize_menu_label(label) == target_label), None)
+                    if menu_targets and mapped_transition is None:
+                        raise ValueError(
+                            "click_menu_target from the recognized stacked main menu must use a configured target transition")
                     if mapped_transition == "world_select":
                         canonical_result = "World selection screen appears"
                         canonical_check = "World selection screen is visible"

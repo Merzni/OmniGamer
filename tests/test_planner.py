@@ -277,6 +277,24 @@ class GoalPlannerTests(unittest.TestCase):
         self.assertEqual(step.expected_result, "World selection screen appears")
         self.assertEqual(step.success_check, "World selection screen is visible")
 
+    def test_stacked_main_menu_rejects_unconfigured_world_creation_target(self):
+        profile = GameProfile(game_id="minecraft", ui_adapters=[
+            "world_selection", "stacked_main_menu"],
+            main_menu_target_transitions={"Одиночная игра": "world_select"})
+        planner = GoalPlanner(default_registry(), lambda **_: None)
+        frame = Image.new("RGB", (800, 600))
+        plan = {"steps": [{
+            "skill": "click_menu_target",
+            "args": {"target_label": "Создать новый мир", "intent": "Create a world",
+                     "expected_result": "World selection screen appears"},
+            "expected_result": "World selection screen appears",
+            "success_check": "World selection screen is visible",
+        }]}
+
+        with patch("omnigamer.planner.stacked_main_menu_layout", return_value=True):
+            with self.assertRaisesRegex(ValueError, "configured target transition"):
+                planner.validate(plan, profile=profile, menu_visible=True, frame=frame)
+
     def test_profiled_main_menu_transition_does_not_apply_without_layout_evidence(self):
         profile = GameProfile(game_id="minecraft", ui_adapters=[
             "world_selection", "stacked_main_menu"],
@@ -1682,6 +1700,10 @@ class GoalPlannerTests(unittest.TestCase):
         self.assertEqual(result, {"steps": []})
         payload = requests[0][1]["json"]
         self.assertIn("immediate next visible screen/state after that one click",
+                      payload["messages"][0]["content"])
+        self.assertIn("keep expected_result and success_check at the step level, never inside args",
+                      payload["messages"][0]["content"])
+        self.assertIn("listed in profile.main_menu_target_transitions",
                       payload["messages"][0]["content"])
         self.assertEqual(payload["response_format"]["json_schema"]["name"], "GoalPlan")
         self.assertEqual(payload["response_format"]["json_schema"]["schema"]["properties"]["steps"]["maxItems"], 6)

@@ -8,7 +8,7 @@ from omnigamer.planner import GoalExecutor, GoalPlanner, InputActionBudget, Budg
 from omnigamer.skills.contracts import SkillStatus
 from omnigamer.skills.registry import default_registry
 from omnigamer.skills.registry import execute_click_menu_target
-from omnigamer.skills.menu import click_menu_target
+from omnigamer.skills.menu import click_menu_target, classify_menu_result
 from omnigamer.vision_brain import BrainDecision
 
 
@@ -116,6 +116,11 @@ class MenuSkillTests(unittest.TestCase):
             prepare_target=Mock(), check_target=Mock())
         self.assertEqual(result.result_code, "MENU_ACTION_UNCONFIRMED")
         self.controls.click.assert_called_once()
+
+    def test_world_creation_result_is_not_classified_as_world_selection(self):
+        self.assertEqual(classify_menu_result("Список доступных миров"), "world_select")
+        self.assertEqual(classify_menu_result(
+            "Экран создания мира с полями для названия и выбора мира"), "world_creation")
 
     def test_world_selection_adapter_refuses_unspecified_transition(self):
         unsafe = self.grounded.model_copy(update={"menu_id": "world_select",

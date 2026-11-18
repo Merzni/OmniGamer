@@ -25,6 +25,10 @@ def classify_menu_result(value):
             or ("world" in word_set and "load" in word_set)
             or "game started" in text):
         return "gameplay"
+    if (word_set & {"create", "creating", "creation", "создать", "создания", "создание",
+                    "создании", "созданию", "создана", "создано", "новый", "нового",
+                    "новую", "новом"}):
+        return "world_creation"
     if ("world" in word_set and word_set & {"list", "selection", "select"}) or (
             has_world and word_set & {"список", "списке", "выбор", "выбору", "выбора"}):
         return "world_select"

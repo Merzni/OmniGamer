@@ -287,11 +287,12 @@ class VisionBrain:
         }
         prompt = (
             "Create a bounded plan for the user's goal. Return only the supplied JSON schema. "
-            "Use the shortest viable plan, preferably one to three steps, never more than six. Each step must use one listed skill and arguments matching its schema. "
+            "Use the shortest viable plan, preferably one to three steps, never more than six. Each step must use one listed skill and arguments matching its schema. Put only that skill's parameters inside args; keep expected_result and success_check at the step level, never inside args. "
             "When a prior verified example in skill_outcomes matches the current visible state and goal, prefer reusing its arguments and success check; do not treat failed or uncertain examples as learned successes. "
             "After a failed skill, do not repeat the same plan or start with the same failed skill and identical arguments; choose a different strategy based on the current image. "
             "For a multi-step plan, each next step must depend on the preceding step's expected_result, and that transition must have a visible success_check. Runtime verifies low-level command transitions before continuing; if a check is uncertain it stops and replans from a fresh image. "
             "When the current image is a menu and the profile enables a UI adapter, use click_menu_target with the visible control label and intent. Never use interact_until_change, move_pulse, turn, or a gameplay action to operate a menu. Menu clicks are localized again from the current screenshot and their result is verified before another planned step. "
+            "On a recognized stacked main menu, choose only a target_label listed in profile.main_menu_target_transitions; do not substitute an unrelated visible control such as a world-creation button. "
             "For click_menu_target, target_label must be the exact visible control that directly advances the user's goal; expected_result and success_check must describe the resulting screen/state. Do not choose a merely visible or menu-related control (for example, a promotional/online-play button for a single-player goal). If no direct control is clear, do not click. "
             "For a menu click, expected_result and success_check must describe the immediate next visible screen/state after that one click; do not skip intermediate menus or describe only the eventual goal. "
             "Do not invent a skill or parameter. Avoid redundant steps; keep expected_result and success_check to a few words. "
