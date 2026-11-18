@@ -57,9 +57,12 @@ class OmniAgent:
         self.last_menu_memory = {}
         self.persona = StreamerPersona(name=config.persona_name)
         self._stop_event = Event()
-        self.emergency_hotkey = (EmergencyHotkey(config.emergency_key, self.request_stop)
+        self._stop_reason = None
+        self.emergency_hotkey = (EmergencyHotkey(
+            config.emergency_key, self.request_stop, on_error=self._emergency_hotkey_failed)
                                  if emergency_hotkey_enabled else None)
         self.last_emergency_release_error = ""
+        self.last_emergency_hotkey_error = ""
         self.telemetry = RunTelemetry(
             config.data_dir,
             enabled=config.telemetry_enabled if telemetry_enabled is None else telemetry_enabled,
@@ -112,7 +115,7 @@ class OmniAgent:
 
     def _check_stop(self):
         if self._stop_event.is_set():
-            raise InterruptedError(f"Emergency stop requested ({config.emergency_key})")
+            raise InterruptedError(f"Emergency stop requested ({self._stop_reason or config.emergency_key})")
 
     def _check_profile_forbidden_key(self, decision):
         if not self.profile:
@@ -159,8 +162,10 @@ class OmniAgent:
             return decision.model_copy(update={"key": key, "duration": min(duration, jump.duration)})
         return decision.model_copy(update={"key": key, "duration": duration})
 
-    def request_stop(self):
+    def request_stop(self, reason="f12"):
         """Latch the stop flag and immediately release bot-held inputs."""
+        if self._stop_reason is None:
+            self._stop_reason = reason
         self._stop_event.set()
         self.is_running = False
         try:
@@ -168,6 +173,11 @@ class OmniAgent:
             self.last_emergency_release_error = "; ".join(str(error) for error in errors)
         except Exception as exc:
             self.last_emergency_release_error = f"{type(exc).__name__}: {exc}"
+
+    def _emergency_hotkey_failed(self, error):
+        self.last_emergency_hotkey_error = f"{type(error).__name__}: {error}"
+        self.last_error = f"Emergency hotkey polling failed: {self.last_emergency_hotkey_error}"
+        self.request_stop("emergency_hotkey_error")
 
     def _call_interruptibly(self, function, *args, **kwargs):
         """Run a blocking model request without making the stop wait for its timeout."""
@@ -236,9 +246,10 @@ class OmniAgent:
         return started
 
     def end_telemetry_run(self, reason, error_message=None):
-        if reason == "error" and hasattr(self, "controls"):
+        if reason in {"error", "emergency_hotkey_error"} and hasattr(self, "controls"):
             try:
-                self.controls.release_all()
+                errors = self.controls.release_all()
+                self.last_emergency_release_error = "; ".join(str(error) for error in errors)
             except Exception as exc:
                 logging.getLogger(__name__).warning("Input release during error finalization failed (%s)",
                                                     type(exc).__name__)
@@ -325,7 +336,11 @@ class OmniAgent:
             self.last_timings = {}
             self.controls.aborted = False
             self._stop_event.clear()
+            self._stop_reason = None
             self.last_emergency_release_error = ""
+            self.last_emergency_hotkey_error = ""
+            if self.emergency_hotkey:
+                self.emergency_hotkey.last_error = ""
             self._build_controls()
             self._pending_menu = None
             self.last_menu_memory = {}
@@ -413,8 +428,13 @@ class OmniAgent:
                     del raw_responses[:]
                 self._telemetry_trace = None
                 if failure is not None and not isinstance(failure, VisionDecisionError):
-                    reason = "f12" if isinstance(failure, InterruptedError) and self._stop_event.is_set() else "error"
-                    self.end_telemetry_run(reason, error_message=self.last_error if reason == "error" else None)
+                    reason = ((self._stop_reason or "f12")
+                              if isinstance(failure, InterruptedError) and self._stop_event.is_set()
+                              else "error")
+                    message = (self.last_emergency_hotkey_error
+                               if reason == "emergency_hotkey_error"
+                               else self.last_error if reason == "error" else None)
+                    self.end_telemetry_run(reason, error_message=message)
 
     def _step(self) -> Dict:
         """Run a single perception-decision-action-evaluation cycle."""
@@ -1045,7 +1065,10 @@ class OmniAgent:
             termination_reason = "step_limit"
             for i in range(max_steps):
                 if not self.is_running:
-                    termination_reason = "f12" if self._stop_event.is_set() else "panel_stop"
+                    termination_reason = ((self._stop_reason or "f12")
+                                          if self._stop_event.is_set() else "panel_stop")
+                    if termination_reason == "emergency_hotkey_error":
+                        termination_error = self.last_emergency_hotkey_error
                     break
                 try:
                     self.step()
@@ -1057,12 +1080,17 @@ class OmniAgent:
                         f"Не удалось разобрать экран. Повторю попытку через {delay:.0f} с.", mood="confused"
                     )
                     if self._stop_event.wait(delay):
-                        termination_reason = "f12"
+                        termination_reason = self._stop_reason or "f12"
+                        if termination_reason == "emergency_hotkey_error":
+                            termination_error = self.last_emergency_hotkey_error
                         break
         except InterruptedError as e:
-            termination_reason = "f12" if self._stop_event.is_set() else "error"
+            termination_reason = ((self._stop_reason or "f12")
+                                  if self._stop_event.is_set() else "error")
             if termination_reason == "error":
                 termination_error = f"{type(e).__name__}: {e}"
+            elif termination_reason == "emergency_hotkey_error":
+                termination_error = self.last_emergency_hotkey_error
             self.persona.speak(f"Ой! Аварийная остановка: {e}", mood="upset")
         except KeyboardInterrupt:
             termination_reason = "panel_stop"

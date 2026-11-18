@@ -76,8 +76,9 @@ def trigger_step(single_step: bool = False):
         return result
     except Exception as exc:
         if single_step or not isinstance(exc, VisionDecisionError):
-            reason = "f12" if isinstance(exc, InterruptedError) else "error"
-            message = f"{type(exc).__name__}: {exc}" if reason == "error" else None
+            reason = (agent._stop_reason or "f12") if isinstance(exc, InterruptedError) else "error"
+            message = (agent.last_emergency_hotkey_error if reason == "emergency_hotkey_error"
+                       else f"{type(exc).__name__}: {exc}" if reason == "error" else None)
             agent.end_telemetry_run(reason, error_message=message)
         if isinstance(exc, (RuntimeError, InterruptedError, ValueError)):
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -87,11 +88,11 @@ def trigger_step(single_step: bool = False):
 def stop_telemetry(reason: str = "panel_stop"):
     if not agent:
         raise HTTPException(500, "Agent not initialized")
-    allowed = {"panel_stop", "error", "f12", "step_limit", "single_step"}
+    allowed = {"panel_stop", "error", "f12", "emergency_hotkey_error", "step_limit", "single_step"}
     if reason not in allowed:
         raise HTTPException(400, "Unsupported telemetry termination reason")
     if agent._stop_event.is_set():
-        reason = "f12"
+        reason = agent._stop_reason or "f12"
     agent.end_telemetry_run(reason)
     return {"status": "ok", "reason": reason}
 
@@ -114,6 +115,8 @@ def get_state():
         "memory_context": agent.last_memory_context,
         "memory_warning": agent.last_memory_warning,
         "last_error": agent.last_error,
+        "emergency_hotkey_error": (agent.emergency_hotkey.last_error
+                                    if agent.emergency_hotkey else ""),
         "timings": agent.last_timings,
         "action_source": agent.last_action_source,
         "supervision": agent.supervision_state(),

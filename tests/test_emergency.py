@@ -28,6 +28,7 @@ class EmergencyHotkeyTests(unittest.TestCase):
     def test_request_stop_latches_flag_and_releases_held_input(self):
         agent = OmniAgent.__new__(OmniAgent)
         agent._stop_event = threading.Event()
+        agent._stop_reason = None
         agent.is_running = True
         agent.controls = Mock()
         agent.controls.release_all.return_value = []
@@ -40,6 +41,40 @@ class EmergencyHotkeyTests(unittest.TestCase):
         agent.controls.release_all.assert_called_once_with()
         with self.assertRaises(InterruptedError):
             agent._check_stop()
+
+    def test_key_state_failure_requests_stop_and_records_failure(self):
+        stopped = threading.Event()
+        on_error = Mock(side_effect=lambda error: stopped.set())
+        hotkey = EmergencyHotkey("F12", Mock(), key_state=Mock(side_effect=OSError("access denied")),
+                                 poll_interval=0.001, on_error=on_error)
+
+        with self.assertLogs("omnigamer.emergency", level="ERROR"):
+            hotkey.start()
+            self.assertTrue(stopped.wait(1))
+            hotkey._thread.join(1)
+
+        self.assertFalse(hotkey._thread.is_alive())
+        self.assertIn("access denied", hotkey.last_error)
+        self.assertEqual(on_error.call_count, 1)
+        hotkey.callback.assert_not_called()
+
+    def test_monitor_failure_stops_agent_with_distinct_reason(self):
+        agent = OmniAgent.__new__(OmniAgent)
+        agent._stop_event = threading.Event()
+        agent._stop_reason = None
+        agent.is_running = True
+        agent.controls = Mock()
+        agent.controls.release_all.return_value = []
+        agent.last_emergency_release_error = ""
+        agent.last_emergency_hotkey_error = ""
+        agent.last_error = ""
+
+        agent._emergency_hotkey_failed(RuntimeError("poll failed"))
+
+        self.assertTrue(agent._stop_event.is_set())
+        self.assertEqual(agent._stop_reason, "emergency_hotkey_error")
+        self.assertIn("poll failed", agent.last_emergency_hotkey_error)
+        agent.controls.release_all.assert_called_once_with()
 
     def test_release_all_sends_up_for_held_key_without_real_input(self):
         controller = controls.HumanInputController(failsafe_corner=False)
@@ -71,6 +106,7 @@ class EmergencyHotkeyTests(unittest.TestCase):
     def test_stop_interrupts_wait_for_blocked_vlm_request(self):
         agent = OmniAgent.__new__(OmniAgent)
         agent._stop_event = threading.Event()
+        agent._stop_reason = None
         started = threading.Event()
 
         def blocked_request():

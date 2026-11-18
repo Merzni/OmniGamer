@@ -169,6 +169,16 @@ class TelemetryTests(unittest.TestCase):
         self.assertEqual(meta["termination_reason"], "error")
         self.assertEqual(meta["error"], "RuntimeError: startup failed")
 
+    def test_emergency_monitor_error_keeps_its_reason_and_message(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            telemetry = RunTelemetry(tmp, enabled=True)
+            run_dir = Path(telemetry.start({"game_id": "test"}))
+            telemetry.finish("emergency_hotkey_error", error_message="OSError: access denied")
+            meta = json.loads((run_dir / "run_meta.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(meta["termination_reason"], "emergency_hotkey_error")
+        self.assertEqual(meta["error"], "OSError: access denied")
+
     def test_summary_p95_percentages_and_resource_stats_on_synthetic_run(self):
         run_dir = self.data_dir / "synthetic-run"
         run_dir.mkdir()

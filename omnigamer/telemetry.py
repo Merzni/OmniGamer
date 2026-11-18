@@ -388,8 +388,8 @@ class RunTelemetry:
         if self.closed:
             return
         with self.lock:
-            if reason == "error":
-                self.finish_reason = "error"
+            if reason == "error" or error_message is not None:
+                self.finish_reason = str(reason)
                 self.finish_error = str(error_message)[:300] if error_message else None
             elif self.finish_reason is None:
                 self.finish_reason = str(reason)
