@@ -8,6 +8,7 @@ from PIL import ImageChops
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..vision_brain import BrainDecision
+from ..ui_grounding import first_world_row, world_selection_cues
 from .contracts import SkillResult, SkillStatus
 
 
@@ -26,11 +27,11 @@ def classify_menu_result(value):
             or "game started" in text):
         return "gameplay"
     if (word_set & {"create", "creating", "creation", "создать", "создания", "создание",
-                    "создании", "созданию", "создана", "создано", "новый", "нового",
-                    "новую", "новом"}):
+                    "создании", "созданию", "создана", "создано"}):
         return "world_creation"
     if ("world" in word_set and word_set & {"list", "selection", "select"}) or (
-            has_world and word_set & {"список", "списке", "выбор", "выбору", "выбора"}):
+            has_world and word_set & {"список", "списке", "выбор", "выбору", "выбора",
+                                      "выбрать", "выбираем", "выборе", "выбором"}):
         return "world_select"
     return None
 
@@ -78,6 +79,23 @@ def _target_patch(frame, x, y):
         max(0, center_x - half_width), max(0, center_y - half_height),
         min(width, center_x + half_width), min(height, center_y + half_height),
     ))
+
+
+def _menu_target_is_stable(frame, current_frame, grounded):
+    if (grounded.menu_id == "world_select"
+            and normalize_menu_label(grounded.target_label) == "visible world row"):
+        before_row = first_world_row(frame)
+        current_row = first_world_row(current_frame)
+        before_state = world_selection_cues(frame)
+        current_state = world_selection_cues(current_frame)
+        return bool(before_row and current_row
+                    and before_state == current_state == (False, False)
+                    and all(abs(before - current) <= 8
+                            for before, current in zip(before_row, current_row)))
+    before_patch = _target_patch(frame, grounded.x, grounded.y)
+    current_patch = _target_patch(current_frame, grounded.x, grounded.y)
+    return (before_patch.size == current_patch.size and ImageChops.difference(
+        before_patch, current_patch).getbbox() is None)
 
 
 def click_menu_target(target_label, intent, expected_result, *, capture, controls, profile, grounder,
@@ -131,10 +149,7 @@ def click_menu_target(target_label, intent, expected_result, *, capture, control
         current_frame = capture.grab_frame()
         if capture.last_rect != before_rect:
             raise RuntimeError("Game window moved/resized while rechecking the menu target")
-        before_patch = _target_patch(frame, grounded.x, grounded.y)
-        current_patch = _target_patch(current_frame, grounded.x, grounded.y)
-        if before_patch.size != current_patch.size or ImageChops.difference(
-                before_patch, current_patch).getbbox() is not None:
+        if not _menu_target_is_stable(frame, current_frame, grounded):
             raise RuntimeError("Menu target changed during localization; click cancelled")
         stage = "target_backend_check"
         check_target()

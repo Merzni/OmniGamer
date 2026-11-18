@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from PIL import Image
 
@@ -70,6 +70,24 @@ class MenuSkillTests(unittest.TestCase):
         self.assertEqual(prepare.call_count, 2)
         check.assert_called_once()
 
+    def test_measured_world_row_survives_animated_background_during_freshness_check(self):
+        before = Image.new("RGB", (1000, 800), (20, 20, 20))
+        after = Image.new("RGB", (1000, 800), (120, 80, 30))
+        self.capture.grab_frame.side_effect = [before, after]
+        measured = self.grounded.model_copy(update={
+            "target_label": "visible_world_row", "menu_id": "world_select",
+            "menu_state": "no_selection", "expected_result": "world_selected"})
+        row = [260, 191, 750, 291]
+        with (patch("omnigamer.skills.menu.first_world_row", return_value=row),
+              patch("omnigamer.skills.menu.world_selection_cues", return_value=(False, False))):
+            result = click_menu_target("visible existing world", "Select a world", "world_selected",
+                capture=self.capture, controls=None, profile=self.profile,
+                grounder=Mock(return_value=measured), prepare_target=Mock(), check_target=Mock(),
+                preview_only=True)
+
+        self.assertEqual(result.result_code, "TARGET_GROUNDED_PREVIEW")
+        self.assertEqual(result.evidence["input_actions"], 0)
+
     def test_emergency_stop_still_propagates_before_grounding(self):
         with self.assertRaisesRegex(InterruptedError, "emergency stop"):
             click_menu_target("Одиночная игра", "Open the world list", "World selection screen appears",
@@ -119,6 +137,7 @@ class MenuSkillTests(unittest.TestCase):
 
     def test_world_creation_result_is_not_classified_as_world_selection(self):
         self.assertEqual(classify_menu_result("Список доступных миров"), "world_select")
+        self.assertEqual(classify_menu_result("Выбрать новый мир"), "world_select")
         self.assertEqual(classify_menu_result(
             "Экран создания мира с полями для названия и выбора мира"), "world_creation")
 
@@ -135,10 +154,13 @@ class MenuSkillTests(unittest.TestCase):
         measured = self.grounded.model_copy(update={
             "target_label": "visible_world_row", "menu_id": "world_select",
             "menu_state": "no_selection", "expected_result": "world_selected"})
-        result = click_menu_target("visible existing world", "Select a world",
-            "world_selected", capture=self.capture, controls=self.controls,
-            profile=self.profile, grounder=Mock(return_value=measured),
-            prepare_target=Mock(), check_target=Mock())
+        row = [260, 191, 750, 291]
+        with (patch("omnigamer.skills.menu.first_world_row", return_value=row),
+              patch("omnigamer.skills.menu.world_selection_cues", return_value=(False, False))):
+            result = click_menu_target("visible existing world", "Select a world",
+                "world_selected", capture=self.capture, controls=self.controls,
+                profile=self.profile, grounder=Mock(return_value=measured),
+                prepare_target=Mock(), check_target=Mock())
         self.assertEqual(result.result_code, "MENU_ACTION_UNCONFIRMED")
         self.controls.click.assert_called_once()
 

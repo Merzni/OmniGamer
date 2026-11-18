@@ -295,6 +295,84 @@ class GoalPlannerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "configured target transition"):
                 planner.validate(plan, profile=profile, menu_visible=True, frame=frame)
 
+    def test_world_selection_with_unselected_existing_row_routes_to_select_then_play(self):
+        profile = GameProfile(game_id="minecraft", ui_adapters=["world_selection"])
+        planner = GoalPlanner(default_registry(), lambda **_: None)
+        frame = Image.new("RGB", (800, 600))
+
+        def click_plan(target_label, expected_result):
+            return {"steps": [{
+                "skill": "click_menu_target",
+                "args": {"target_label": target_label, "intent": "Continue playing",
+                         "expected_result": expected_result},
+                "expected_result": expected_result,
+                "success_check": "The next menu state is visible",
+            }]}
+
+        with (patch("omnigamer.planner.world_selection_cues", return_value=(False, False)),
+              patch("omnigamer.planner.first_world_row", return_value=[260, 191, 750, 291]),
+              patch("omnigamer.planner.stacked_main_menu_layout", return_value=False)):
+            corrected = planner.validate(click_plan("Создать новый мир", "World creation screen appears"),
+                                         profile=profile, frame=frame, goal="Добудь дерево")
+            accepted = planner.validate(click_plan("visible_world_row", "world_selected"),
+                                        profile=profile, frame=frame)
+            two_step = click_plan("visible_world_row", "world_selected")
+            two_step["steps"].append({
+                "skill": "click_menu_target",
+                "args": {"target_label": "Play selected world", "intent": "Start playing",
+                         "expected_result": "gameplay"},
+                "expected_result": "gameplay",
+                "success_check": "Gameplay is visible",
+            })
+            accepted_two_step = planner.validate(two_step, profile=profile, frame=frame)
+
+        self.assertEqual(corrected.steps[0].args["target_label"], "visible_world_row")
+        self.assertEqual(corrected.steps[0].expected_result, "world_selected")
+        self.assertEqual(accepted.steps[0].args["target_label"], "visible_world_row")
+        self.assertEqual(accepted.steps[0].expected_result, "world_selected")
+        self.assertEqual(len(accepted_two_step.steps), 2)
+
+    def test_explicit_world_creation_goal_is_not_rerouted_to_existing_world(self):
+        profile = GameProfile(game_id="minecraft", ui_adapters=["world_selection"])
+        planner = GoalPlanner(default_registry(), lambda **_: None)
+        frame = Image.new("RGB", (800, 600))
+        plan = {"steps": [{
+            "skill": "click_menu_target",
+            "args": {"target_label": "Создать новый мир", "intent": "Create a new world",
+                     "expected_result": "World creation screen appears"},
+            "expected_result": "World creation screen appears",
+            "success_check": "World creation settings are visible",
+        }]}
+
+        with (patch("omnigamer.planner.world_selection_cues", return_value=(False, False)),
+              patch("omnigamer.planner.first_world_row", return_value=[260, 191, 750, 291]),
+              patch("omnigamer.planner.stacked_main_menu_layout", return_value=False)):
+            accepted = planner.validate(plan, profile=profile, frame=frame,
+                                        goal="Создай новый мир")
+
+        self.assertEqual(accepted.steps[0].args["target_label"], "Создать новый мир")
+        self.assertEqual(accepted.steps[0].expected_result, "World creation screen appears")
+
+    def test_selected_existing_world_routes_localized_play_target_to_gameplay(self):
+        profile = GameProfile(game_id="minecraft", ui_adapters=["world_selection"])
+        planner = GoalPlanner(default_registry(), lambda **_: None)
+        frame = Image.new("RGB", (800, 600))
+        plan = {"steps": [{
+            "skill": "click_menu_target",
+            "args": {"target_label": "Играть в выбранном мире", "intent": "Continue to world",
+                     "expected_result": "Запускается выбранный мир"},
+            "expected_result": "Запускается выбранный мир",
+            "success_check": "The game is visible",
+        }]}
+
+        with (patch("omnigamer.planner.world_selection_cues", return_value=(True, True)),
+              patch("omnigamer.planner.first_world_row", return_value=[260, 191, 750, 291]),
+              patch("omnigamer.planner.stacked_main_menu_layout", return_value=False)):
+            accepted = planner.validate(plan, profile=profile, frame=frame, goal="Добудь дерево")
+
+        self.assertEqual(accepted.steps[0].args["target_label"], "Play selected world")
+        self.assertEqual(accepted.steps[0].expected_result, "gameplay")
+
     def test_profiled_main_menu_transition_does_not_apply_without_layout_evidence(self):
         profile = GameProfile(game_id="minecraft", ui_adapters=[
             "world_selection", "stacked_main_menu"],
@@ -1098,6 +1176,40 @@ class GoalPlannerTests(unittest.TestCase):
             would_send = next(row for row in logs if row["event"] == "would_send")
             self.assertEqual(would_send["grounded_target"]["evidence"]["input_actions"], 0)
 
+    def test_dry_run_stops_before_dependent_menu_step_without_transition(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = GameProfile(game_id="minecraft", ui_adapters=["world_selection"],
+                motion_limits={"max_run_seconds": 20, "max_actions": 3})
+            plan = {"steps": [
+                {"skill": "click_menu_target", "args": {
+                    "target_label": "visible_world_row", "intent": "Select world",
+                    "expected_result": "world_selected"},
+                 "expected_result": "world_selected", "success_check": "World selected"},
+                {"skill": "click_menu_target", "args": {
+                    "target_label": "Play selected world", "intent": "Start playing",
+                    "expected_result": "gameplay"},
+                 "expected_result": "gameplay", "success_check": "Gameplay visible"},
+            ]}
+            planner = GoalPlanner(default_registry(profile), lambda **_: plan)
+            frame = Image.new("RGB", (800, 600))
+            preview = Mock(return_value={"result_code": "TARGET_GROUNDED_PREVIEW",
+                                         "evidence": {"input_actions": 0}})
+            logs = []
+            executor = GoalExecutor(planner, default_registry(profile),
+                SkillOutcomeStore(Path(tmp) / "outcomes.db"), profile=profile, game_id="minecraft",
+                execute_skill=lambda *_: self.fail("dry-run executed input skill"),
+                frame_provider=lambda: frame, stop_check=lambda: None,
+                dry_run=True, logger=logs.append, menu_preview=preview)
+
+            result = executor.run("Добудь дерево")
+
+        self.assertEqual(result["status"], "DRY_RUN")
+        self.assertIn("next step needs a new screen", result["reason"])
+        self.assertEqual(result["steps"], 1)
+        preview.assert_called_once()
+        self.assertTrue(any(row["event"] == "menu_preview_stopped_before_dependent_step"
+                            for row in logs))
+
     def test_dry_run_menu_preview_failure_never_reports_would_send(self):
         with tempfile.TemporaryDirectory() as tmp:
             profile = GameProfile(game_id="minecraft", ui_adapters=["world_selection"],
@@ -1704,6 +1816,8 @@ class GoalPlannerTests(unittest.TestCase):
         self.assertIn("keep expected_result and success_check at the step level, never inside args",
                       payload["messages"][0]["content"])
         self.assertIn("listed in profile.main_menu_target_transitions",
+                      payload["messages"][0]["content"])
+        self.assertIn("Create a new world only when the goal explicitly asks for it",
                       payload["messages"][0]["content"])
         self.assertEqual(payload["response_format"]["json_schema"]["name"], "GoalPlan")
         self.assertEqual(payload["response_format"]["json_schema"]["schema"]["properties"]["steps"]["maxItems"], 6)

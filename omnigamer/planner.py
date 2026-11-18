@@ -18,7 +18,8 @@ from .skills.contracts import (InputActionLimitExceeded, SkillDeadlineExceeded,
                                SkillStatus)
 from .skills.menu import classify_menu_result, normalize_menu_label
 from .ui_grounding import (button_candidates, has_profile_menu_layout,
-                           stacked_main_menu_layout)
+                           first_world_row, stacked_main_menu_layout,
+                           world_selection_cues)
 
 OUTCOME_SUCCESS_CODES = frozenset({
     "SUCCESS_VERIFIED", "TARGET_DETECTED", "APPROACH_REACHED", "CONDITION_MET",
@@ -293,13 +294,31 @@ class GoalPlanner:
                 properties["region"]["enum"] = sorted(profile.regions)
         return catalog
 
-    def validate(self, raw, profile=None, menu_visible=False, frame=None):
+    @staticmethod
+    def _goal_explicitly_requests_world_creation(goal):
+        words = set(normalize_menu_label(goal).split())
+        creation = words & {"create", "creating", "creation", "создай", "создать",
+                            "создайте", "создание", "создания", "создании", "созданию",
+                            "new", "новый", "нового", "новую", "новом"}
+        world = words & {"world", "мир", "мира", "мире", "миров"}
+        return bool(creation and world)
+
+    def validate(self, raw, profile=None, menu_visible=False, frame=None, goal=""):
         plan = raw if isinstance(raw, GoalPlan) else GoalPlan.model_validate(raw)
+        explicit_world_creation = self._goal_explicitly_requests_world_creation(goal)
         main_menu_layout = bool(
             profile and frame is not None
             and "world_selection" in (profile.ui_adapters or ())
             and "stacked_main_menu" in (profile.ui_adapters or ())
             and stacked_main_menu_layout(button_candidates(frame)))
+        world_selection_next = None
+        if (profile and frame is not None
+                and "world_selection" in (profile.ui_adapters or ())):
+            selection, play_enabled = world_selection_cues(frame)
+            if selection is False and play_enabled is False and first_world_row(frame):
+                world_selection_next = "select_existing_world"
+            elif selection is True and play_enabled is True:
+                world_selection_next = "start_selected_world"
         menu_targets = {
             normalize_menu_label(label)
             for label in (getattr(profile, "main_menu_target_transitions", {}) or {})
@@ -317,7 +336,7 @@ class GoalPlanner:
                         "A visible configured menu target was detected by the plan; "
                         "gameplay skills cannot follow it without a fresh menu-grounded plan")
         validated = []
-        for step in plan.steps:
+        for step_index, step in enumerate(plan.steps):
             if menu_visible and step.skill in MENU_UNSAFE_SKILLS:
                 raise ValueError(f"Skill {step.skill!r} cannot operate a recognized menu screen")
             if (profile and (profile.camera_type == "none" or profile.input_backend == "window")
@@ -330,8 +349,35 @@ class GoalPlanner:
             if step.skill == "click_menu_target":
                 if not profile or not profile.ui_adapters:
                     raise ValueError("Skill 'click_menu_target' requires a profile UI adapter")
-                if main_menu_layout:
+                target_label = normalize_menu_label(values["target_label"])
+                result_class = classify_menu_result(values["expected_result"])
+                if (step_index == 0 and world_selection_next == "select_existing_world"
+                        and not explicit_world_creation
+                        and (target_label != "visible world row" or result_class != "world_selected"
+                             or self._goal_explicitly_requests_world_creation(values["intent"]))):
+                    values["target_label"] = "visible_world_row"
+                    values["intent"] = "Select the visible existing world before starting it"
+                    values["expected_result"] = "world_selected"
+                    step = step.model_copy(update={
+                        "args": values,
+                        "expected_result": "world_selected",
+                        "success_check": "The existing world is visibly selected",
+                    })
                     target_label = normalize_menu_label(values["target_label"])
+                    result_class = "world_selected"
+                if (step_index == 0 and world_selection_next == "start_selected_world"
+                        and not explicit_world_creation
+                        and (target_label != "play selected world" or result_class != "gameplay"
+                             or self._goal_explicitly_requests_world_creation(values["intent"]))):
+                    values["target_label"] = "Play selected world"
+                    values["intent"] = "Start playing the selected world"
+                    values["expected_result"] = "gameplay"
+                    step = step.model_copy(update={
+                        "args": values,
+                        "expected_result": "gameplay",
+                        "success_check": "Gameplay is visible",
+                    })
+                if main_menu_layout:
                     mapped_transition = next((transition for label, transition in
                                               profile.main_menu_target_transitions.items()
                                               if normalize_menu_label(label) == target_label), None)
@@ -430,7 +476,8 @@ class GoalPlanner:
                 finally:
                     request_durations.append(max(0.0, time.monotonic() - request_started))
                 try:
-                    plan = self.validate(raw, profile=profile, menu_visible=menu_visible, frame=frame)
+                    plan = self.validate(raw, profile=profile, menu_visible=menu_visible, frame=frame,
+                                          goal=goal)
                     signature = self.signature(plan, profile=profile)
                     if avoid_plan is not None and signature == avoid_plan:
                         raise ValueError("Plan exactly repeats the previous failed plan; choose a different strategy.")
@@ -1110,6 +1157,15 @@ class GoalExecutor:
                 if result.get("result_code") == "MENU_TARGET_PREVIEW_FAILED":
                     return self._finish({"status": SkillStatus.UNCONFIRMED.value,
                                          "reason": result["reason"], "steps": steps_used})
+                if (self.dry_run and step.skill == "click_menu_target"
+                        and result.get("result_code") == "WOULD_SEND"
+                        and "grounded_target" in resolved and not is_final_step):
+                    reason = "menu_transition_previewed_without_input; next step needs a new screen"
+                    if self.logger:
+                        self.logger({"event": "menu_preview_stopped_before_dependent_step",
+                                     "skill": step.skill, "reason": reason})
+                    return self._finish({"status": "DRY_RUN", "reason": reason,
+                                         "steps": steps_used})
                 if result.get("reason") == "goal_result_unverified":
                     return self._finish({"status": SkillStatus.UNCONFIRMED.value,
                                          "reason": result["reason"], "steps": steps_used})

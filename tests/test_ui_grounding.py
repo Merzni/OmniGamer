@@ -168,6 +168,13 @@ class GroundingTests(unittest.TestCase):
         self.assertTrue(790<play.y<900)
         self.assertEqual(play.expected_result,'gameplay')
 
+    def test_explicit_world_creation_target_is_not_replaced_with_existing_row(self):
+        frame=self.world_list(False)
+        action=BrainDecision(action_type='click',target_label='Создать новый мир',
+                             intent='Create a new world')
+        self.assertIsNone(self.brain._world_list_action(
+            frame,action,button_candidates(frame)))
+
     def test_world_list_geometry_adapter_is_disabled_without_profile_opt_in(self):
         response,_=self.target(menu_id='world_select',menu_state='unknown_selection')
         profile=load_profile('example-game')

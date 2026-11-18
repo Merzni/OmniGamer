@@ -293,6 +293,7 @@ class VisionBrain:
             "For a multi-step plan, each next step must depend on the preceding step's expected_result, and that transition must have a visible success_check. Runtime verifies low-level command transitions before continuing; if a check is uncertain it stops and replans from a fresh image. "
             "When the current image is a menu and the profile enables a UI adapter, use click_menu_target with the visible control label and intent. Never use interact_until_change, move_pulse, turn, or a gameplay action to operate a menu. Menu clicks are localized again from the current screenshot and their result is verified before another planned step. "
             "On a recognized stacked main menu, choose only a target_label listed in profile.main_menu_target_transitions; do not substitute an unrelated visible control such as a world-creation button. "
+            "On a world-selection screen, if an existing world row is visible and no row is selected, choose target_label='visible_world_row' with expected_result='world_selected'; then choose target_label='Play selected world' with expected_result='gameplay'. Create a new world only when the goal explicitly asks for it or no existing world row is visible. "
             "For click_menu_target, target_label must be the exact visible control that directly advances the user's goal; expected_result and success_check must describe the resulting screen/state. Do not choose a merely visible or menu-related control (for example, a promotional/online-play button for a single-player goal). If no direct control is clear, do not click. "
             "For a menu click, expected_result and success_check must describe the immediate next visible screen/state after that one click; do not skip intermediate menus or describe only the eventual goal. "
             "Do not invent a skill or parameter. Avoid redundant steps; keep expected_result and success_check to a few words. "
@@ -460,6 +461,14 @@ class VisionBrain:
     def _world_list_action(frame,decision,boxes):
         selection,play=world_selection_cues(frame)
         row=first_world_row(frame)
+        target_words=set(re.findall(r"[a-z0-9а-яё]+", decision.target_label.casefold()))
+        requests_world_creation=bool(
+            target_words & {"create","creating","creation","new","создай","создать","создайте",
+                            "создание","создания","создании","созданию","новый","нового",
+                            "новую","новом"}
+            and target_words & {"world","мир","мира","мире","миров"})
+        if requests_world_creation:
+            return None
         if not row:return None
         if selection is False and play is False:
             return decision.model_copy(update={"x":round((row[0]+row[2])/2),"y":round((row[1]+row[3])/2),
