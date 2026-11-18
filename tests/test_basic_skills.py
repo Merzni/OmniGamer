@@ -4,7 +4,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from omnigamer.profiles import NormalizedRegion, load_profile
+from omnigamer.profiles import NormalizedRegion
+from profile_fixtures import load_profile
 from omnigamer.skills.basic import (
     interact_until_change,
     move_pulse,
@@ -138,7 +139,7 @@ class BasicSkillTests(unittest.TestCase):
         self.assertEqual(result.status, SkillStatus.UNCONFIRMED)
         self.assertEqual(result.result_code, "REGION_CHANGE_UNCONFIRMED")
         self.assertEqual(result.reason, "region_changed_unverified")
-        self.assertEqual(controls.calls, [("mouse", "left", 2.5)])
+        self.assertEqual(controls.calls, [("mouse", "left", 1.25)])
         self.assertGreaterEqual(result.evidence["region_delta"], result.evidence["threshold"])
         self.assertEqual(rows[0]["skill"], "interact_until_change")
 
@@ -153,7 +154,7 @@ class BasicSkillTests(unittest.TestCase):
         self.assertEqual(result.status, SkillStatus.UNCONFIRMED)
         self.assertEqual(result.result_code, "INTERACTION_OUTCOME_UNCONFIRMED")
         self.assertEqual(result.reason, "interaction_without_region_change")
-        self.assertEqual(controls.calls, [("mouse", "left", 2.5), ("mouse", "left", 2.5)])
+        self.assertEqual(controls.calls, [("mouse", "left", 1.25), ("mouse", "left", 1.25)])
 
     def test_wait_for_condition_returns_on_detector_match(self):
         frame = Image.new("RGB", (20, 20))

@@ -7,7 +7,7 @@ from omnigamer.vision_brain import VisionBrain,BrainDecision
 from omnigamer.ui_grounding import (button_candidates,world_selection_cues,stacked_main_menu_layout,
                                     has_profile_menu_layout)
 from omnigamer.camera_feedback import camera_feedback
-from omnigamer.profiles import load_profile
+from profile_fixtures import load_profile
 import numpy as np
 
 

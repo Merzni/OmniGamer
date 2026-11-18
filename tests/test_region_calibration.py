@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from omnigamer.profiles import load_profile
+from profile_fixtures import load_profile
 from tools.calibrate_region_metric import choose_threshold, load_samples, write_threshold
 
 

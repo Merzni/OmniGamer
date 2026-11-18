@@ -3,14 +3,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from omnigamer.profiles import GameProfile, load_profile
+from omnigamer.profiles import GameProfile
 from omnigamer.skills.approach_target import ApproachTargetSettings
 from omnigamer.agent import OmniAgent
 from omnigamer.vision_brain import BrainDecision
+from profile_fixtures import load_profile
 
 
 class GameProfileTests(unittest.TestCase):
-    def test_builtin_profile_validates_game_controls_and_regions(self):
+    def test_minecraft_fixture_validates_game_controls_and_regions(self):
         profile = load_profile("minecraft")
         self.assertEqual(profile.game_id, "minecraft")
         self.assertEqual(profile.move_keys["forward"], "w")
@@ -82,29 +83,29 @@ class GameProfileTests(unittest.TestCase):
         self.assertEqual(profile.forbidden_keys, [])
 
     def test_documented_template_is_valid_profile_data(self):
-        template = Path(__file__).resolve().parents[1] / "data" / "profiles" / "_template.json"
+        template = Path(__file__).resolve().parents[1] / "profiles" / "_template.json"
         profile = load_profile("example-game", template)
         self.assertEqual(profile.game_id, "example-game")
         self.assertTrue(profile.comment)
 
     def test_profile_thresholds_and_limits_configure_target_skill(self):
         settings = ApproachTargetSettings.from_profile(load_profile("minecraft"))
-        self.assertEqual(settings.deadzone_x, 0.06)
-        self.assertEqual(settings.score_min, 0.15)
-        self.assertEqual(settings.max_seconds, 120)
-        self.assertEqual(settings.max_impulses, 60)
-        self.assertEqual(settings.max_look_counts, 30)
-        self.assertEqual(settings.track_max_center_shift, 0.2)
-        self.assertEqual(settings.reach_crosshair_margin, 0.08)
-        self.assertEqual(settings.jump_recovery_attempts, 2)
-        self.assertEqual(load_profile("minecraft").motion_limits.interaction_retry_step_seconds, 0)
+        self.assertEqual(settings.deadzone_x, 0.07)
+        self.assertEqual(settings.score_min, 0.18)
+        self.assertEqual(settings.max_seconds, 90)
+        self.assertEqual(settings.max_impulses, 48)
+        self.assertEqual(settings.max_look_counts, 24)
+        self.assertEqual(settings.track_max_center_shift, 0.22)
+        self.assertEqual(settings.reach_crosshair_margin, 0.09)
+        self.assertEqual(settings.jump_recovery_attempts, 1)
+        self.assertEqual(load_profile("minecraft").motion_limits.interaction_retry_step_seconds, 0.1)
 
-    def test_minecraft_profile_allows_repeated_verified_harvest(self):
+    def test_minecraft_fixture_allows_repeated_verified_harvest(self):
         profile = load_profile("minecraft")
-        self.assertEqual(profile.actions["primary_hold"].duration, 2.5)
-        self.assertEqual(profile.thresholds["region_change"], 0.18525896966457367)
-        self.assertIn("max_repeats=3", profile.prompt_addendum)
-        self.assertIn("stops as soon as it changes", profile.prompt_addendum)
+        self.assertEqual(profile.actions["primary_hold"].duration, 1.25)
+        self.assertEqual(profile.thresholds["region_change"], 0.22)
+        self.assertIn("at most two mining repeats", profile.prompt_addendum)
+        self.assertIn("stop when it changes", profile.prompt_addendum)
 
     def test_legacy_motion_uses_profile_mapping_and_caps_duration(self):
         profile = GameProfile(game_id="arrow-game", camera_type="first_person",

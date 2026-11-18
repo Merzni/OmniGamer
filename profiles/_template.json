@@ -1,0 +1,76 @@
+{
+  "_comment": "Copy this file to data/profiles/<game_id>.json and replace the example values. This _comment field is accepted for documentation only. Enable a UI adapter only for a matching recognized layout.",
+  "game_id": "example-game",
+  "window": "",
+  "camera_type": "none",
+  "move_keys": {
+    "forward": "w",
+    "backward": "s",
+    "left": "a",
+    "right": "d"
+  },
+  "actions": {
+    "primary_hold": {
+      "kind": "mouse",
+      "value": "left",
+      "duration": 0.5
+    },
+    "interact": {
+      "kind": "mouse",
+      "value": "right",
+      "duration": 0.08
+    },
+    "menu_open": {
+      "kind": "key",
+      "value": "i",
+      "duration": 0.08
+    },
+    "jump": {
+      "kind": "key",
+      "value": "space",
+      "duration": 0.6
+    }
+  },
+  "mine_actions": [],
+  "regions": {
+    "example_hud_region": {
+      "x1": 0.0,
+      "y1": 0.8,
+      "x2": 1.0,
+      "y2": 1.0
+    }
+  },
+  "forbidden_keys": [
+    "esc",
+    "alt+f4"
+  ],
+  "motion_limits": {
+    "max_action_seconds": 0.75,
+    "max_run_seconds": 120,
+    "max_actions": 60,
+    "max_turn_counts": 30,
+    "max_sweep_counts": 360,
+    "max_jump_recovery_attempts": 1,
+    "interaction_retry_step_seconds": 0.25
+  },
+  "detector_queries": {
+    "example_target": [
+      "a target",
+      "the target"
+    ]
+  },
+  "ui_adapters": [],
+  "main_menu_target_transitions": {},
+  "thresholds": {
+    "example_threshold": 0.5,
+    "approach_track_max_center_shift": 0.35,
+    "approach_reach_crosshair_margin": 0.05
+  },
+  "prompt_addendum": "Short game-specific visual or planning notes.",
+  "calibration": {
+    "normalized_error_per_camera_count": 0.0,
+    "invert_horizontal": false
+  },
+  "mine_requires_grounded_level_view": false,
+  "mine_requires_target_at_crosshair": false
+}

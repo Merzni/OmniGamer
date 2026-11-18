@@ -10,7 +10,8 @@ from omnigamer.skills.approach_target import (
 )
 from omnigamer.detector_client import preprocess_image
 from omnigamer.look import look_counts
-from omnigamer.profiles import GameProfile, load_profile
+from omnigamer.profiles import GameProfile
+from profile_fixtures import load_profile
 from omnigamer.supervision import CameraGuard
 from tools.summarize_run import summarize
 
@@ -385,8 +386,8 @@ class ApproachTargetTests(unittest.TestCase):
             settings=ApproachTargetSettings.from_profile(profile))
         result = skill.run()
         self.assertEqual(result.state, "REACHED")
-        self.assertIn(("chord", ["w", "space"], 0.6), controls.calls)
-        self.assertEqual(sum(call[0] == "chord" for call in controls.calls), 2)
+        self.assertIn(("chord", ["w", "space"], 0.3), controls.calls)
+        self.assertEqual(sum(call[0] == "chord" for call in controls.calls), 1)
         self.assertTrue(controls.released)
 
     def test_forbidden_jump_key_is_not_used_for_blocked_recovery(self):

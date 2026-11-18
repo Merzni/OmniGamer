@@ -13,7 +13,8 @@ from PIL import Image
 from omnigamer.memory import GameMemory
 from omnigamer.config import config
 from omnigamer.vision_brain import BrainDecision, VisionBrain
-from omnigamer.profiles import GameProfile, InputAction, load_profile
+from omnigamer.profiles import GameProfile, InputAction
+from profile_fixtures import load_profile
 
 
 class MemoryTests(unittest.TestCase):
@@ -682,12 +683,12 @@ class AgentMemoryTests(unittest.TestCase):
         self.assertEqual(assessment_action["scene_type"],"menu")
 
     def test_minecraft_title_status_suffix_does_not_switch_memory_profile(self):
-        self.WindowCapture.return_value.get_window_title.return_value="Minecraft* 26.3"
+        self.WindowCapture.return_value.get_window_title.return_value="OmniGamer Test Window* 26.3"
         agent=self.module.OmniAgent(db_path=self.path,hwnd=123,input_backend="native",
                                      emergency_hotkey_enabled=False, telemetry_enabled=False,
                                      profile=load_profile("minecraft"))
         original=agent.game_id
-        self.WindowCapture.return_value.get_window_title.return_value="Minecraft* 26.3 - Одиночная игра"
+        self.WindowCapture.return_value.get_window_title.return_value="OmniGamer Test Window* 26.3 - Одиночная игра"
         agent.attach(123)
         self.assertEqual(agent.game_id,original)
 

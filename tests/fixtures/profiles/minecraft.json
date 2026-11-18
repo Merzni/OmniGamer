@@ -1,0 +1,80 @@
+{
+  "_comment": "Synthetic test fixture only; values are not a local game profile.",
+  "game_id": "minecraft",
+  "window": "OmniGamer Test Window",
+  "camera_type": "first_person",
+  "move_keys": {
+    "forward": "w",
+    "backward": "s",
+    "left": "a",
+    "right": "d"
+  },
+  "actions": {
+    "primary_hold": {
+      "kind": "mouse",
+      "value": "left",
+      "duration": 1.25
+    },
+    "interact": {
+      "kind": "mouse",
+      "value": "right",
+      "duration": 0.08
+    },
+    "menu_open": {
+      "kind": "key",
+      "value": "e",
+      "duration": 0.08
+    },
+    "jump": {
+      "kind": "key",
+      "value": "space",
+      "duration": 0.3
+    }
+  },
+  "mine_actions": ["primary_hold"],
+  "regions": {
+    "hotbar": {
+      "x1": 0.3,
+      "y1": 0.9,
+      "x2": 0.7,
+      "y2": 1.0
+    }
+  },
+  "forbidden_keys": ["esc", "alt+f4"],
+  "motion_limits": {
+    "max_action_seconds": 0.75,
+    "max_run_seconds": 90,
+    "max_actions": 48,
+    "max_turn_counts": 24,
+    "max_sweep_counts": 240,
+    "max_jump_recovery_attempts": 1,
+    "interaction_retry_step_seconds": 0.1
+  },
+  "detector_queries": {
+    "tree_trunk": ["a tree trunk", "a tree"]
+  },
+  "ui_adapters": ["world_selection", "stacked_main_menu"],
+  "main_menu_target_transitions": {
+    "Одиночная игра": "world_select",
+    "Singleplayer": "world_select",
+    "Single Player": "world_select",
+    "Play Singleplayer": "world_select"
+  },
+  "thresholds": {
+    "approach_deadzone_x": 0.07,
+    "approach_align_exit_x": 0.09,
+    "approach_reach_height": 0.8,
+    "approach_reach_top_y": 0.02,
+    "approach_reach_min_width": 0.1,
+    "approach_reach_center_x": 0.15,
+    "approach_reach_center_stability": 0.05,
+    "approach_reach_crosshair_margin": 0.09,
+    "approach_track_max_center_shift": 0.22,
+    "detector_score_min": 0.18,
+    "detector_max_box_area": 0.6,
+    "region_change": 0.22
+  },
+  "prompt_addendum": "Synthetic test profile: allow at most two mining repeats, then check the sample hotbar region and stop when it changes.",
+  "mine_requires_grounded_level_view": true,
+  "mine_requires_target_at_crosshair": true
+}

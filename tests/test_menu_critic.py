@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import Mock,patch
 from PIL import Image
 from omnigamer.vision_brain import VisionBrain
-from omnigamer.profiles import load_profile
+from profile_fixtures import load_profile
 
 
 class MenuCriticTests(unittest.TestCase):

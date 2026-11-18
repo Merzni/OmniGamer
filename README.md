@@ -70,7 +70,7 @@ CLI требует выбрать режим явно. Сухой план: `pyt
 
 ### Профиль новой игры за 10 шагов
 
-1. Скопируйте `data/profiles/_template.json` в `data/profiles/<id>.json` и задайте уникальный `game_id`.
+1. Создайте `data/profiles/`, скопируйте `profiles/_template.json` в `data/profiles/<id>.json` и задайте уникальный `game_id`.
 2. Укажите подстроку заголовка окна и `input_backend`.
 3. Задайте `camera_type` и клавиши четырёх направлений.
 4. Опишите именованные `actions` с типом, клавишей/кнопкой и длительностью.
