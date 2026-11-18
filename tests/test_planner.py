@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import tempfile
 from contextlib import closing
@@ -69,6 +70,37 @@ class GoalPlannerTests(unittest.TestCase):
         planner = GoalPlanner(self.registry, lambda **_: plan_for(args={"direction": "up", "seconds": 99}))
         with self.assertRaises(PlanningError):
             planner.plan(frame=None, goal="x", profile=self.profile)
+
+    def test_malformed_json_plan_gets_one_bounded_retry(self):
+        requests = []
+
+        def request_plan(**request):
+            requests.append(request)
+            if len(requests) == 1:
+                raise json.JSONDecodeError("Expecting property name", "{\"steps\": [}", 13)
+            return plan_for()
+
+        planner = GoalPlanner(self.registry, request_plan, max_validation_retries=1)
+        plan = planner.plan(frame=None, goal="move", profile=self.profile)
+
+        self.assertEqual(len(plan.steps), 1)
+        self.assertEqual(len(requests), 2)
+        self.assertIn("malformed JSON", requests[1]["validation_error"])
+        self.assertEqual(len(planner.last_plan_metrics["request_durations_seconds"]), 2)
+
+    def test_repeated_malformed_json_plan_fails_after_retry_limit(self):
+        requests = []
+
+        def request_plan(**_request):
+            requests.append(1)
+            raise json.JSONDecodeError("Expecting property name", "{\"steps\": [}", 13)
+
+        planner = GoalPlanner(self.registry, request_plan, max_validation_retries=1)
+        with self.assertRaisesRegex(PlanningError, "invalid plan after 2 request\\(s\\).*malformed JSON"):
+            planner.plan(frame=None, goal="move", profile=self.profile)
+
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(len(planner.last_plan_metrics["request_durations_seconds"]), 2)
 
     def test_plan_schema_accepts_six_steps_and_rejects_seven(self):
         step = plan_for()["steps"][0]

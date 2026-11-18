@@ -470,6 +470,12 @@ class GoalPlanner:
                     raw = self.request_plan(**request)
                 except InterruptedError:
                     raise
+                except json.JSONDecodeError as exc:
+                    error = f"Planner returned malformed JSON: {exc.msg} (line {exc.lineno}, column {exc.colno})"
+                    if attempt < self.max_validation_retries:
+                        continue
+                    raise PlanningError(
+                        f"Planner returned an invalid plan after {attempt + 1} request(s): {error}") from exc
                 except Exception as exc:
                     detail = f"{type(exc).__name__}: {exc}"[:300]
                     raise PlanningError(f"Goal planner request failed: {detail}") from exc
