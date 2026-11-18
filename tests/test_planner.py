@@ -77,6 +77,119 @@ class GoalPlannerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             GoalPlan.model_validate({"steps": [step] * 7})
 
+    def test_adjacent_search_to_approach_hands_off_selected_target(self):
+        profile = self.profile
+        registry = default_registry(profile=profile)
+        target_seed = {"x1": .2, "y1": .2, "x2": .4, "y2": .7,
+                       "score": .8, "query": "a tree trunk"}
+        plan = {"steps": [
+            {"skill": "search_target", "args": {"target_text": "a tree trunk", "sweep": 2},
+             "expected_result": "target detected", "success_check": "target is visible"},
+            {"skill": "approach_target", "args": {"target_text": "a tree trunk"},
+             "expected_result": "target reached", "success_check": "target is centered"},
+        ]}
+        context = {}
+        observed_contexts = []
+
+        def execute(spec, _args, _remaining):
+            observed_contexts.append(dict(context))
+            if spec.name == "search_target":
+                return SkillResult(status=SkillStatus.SUCCESS, result_code="TARGET_DETECTED",
+                                   reason="target_detected",
+                                   evidence={"target_text": "a tree trunk",
+                                             "target_seed": target_seed})
+            return SkillResult(status=SkillStatus.SUCCESS, result_code="APPROACH_REACHED",
+                               reason="target_reached")
+
+        runner = GoalExecutor(GoalPlanner(registry, lambda **_: plan), registry,
+            SkillOutcomeStore(":memory:"), profile=profile, game_id="sim",
+            execute_skill=execute, frame_provider=lambda: Image.new("RGB", (32, 24)),
+            stop_check=lambda: None, result_verifier=confirm_goal, max_replans=0,
+            skill_context=context)
+
+        result = runner.run("approach a tree trunk")
+
+        self.assertEqual(result["status"], "SUCCESS")
+        self.assertEqual(observed_contexts[0], {})
+        self.assertEqual(observed_contexts[1]["approach_target_seed"], target_seed)
+        self.assertEqual(context, {})
+
+    def test_search_seed_is_not_handed_off_across_intervening_skill(self):
+        profile = self.profile
+        registry = default_registry(profile=profile)
+        plan = {"steps": [
+            {"skill": "search_target", "args": {"target_text": "a tree trunk", "sweep": 2},
+             "expected_result": "target detected", "success_check": "target is visible"},
+            {"skill": "turn", "args": {"direction": "right", "amount": 10},
+             "expected_result": "camera turned", "success_check": "turn sent"},
+            {"skill": "approach_target", "args": {"target_text": "a tree trunk"},
+             "expected_result": "target reached", "success_check": "target is centered"},
+        ]}
+        context = {}
+        approach_context = []
+
+        def execute(spec, _args, _remaining):
+            if spec.name == "approach_target":
+                approach_context.append(dict(context))
+            if spec.name == "search_target":
+                return SkillResult(status=SkillStatus.SUCCESS, result_code="TARGET_DETECTED",
+                                   reason="target_detected", evidence={
+                                       "target_text": "a tree trunk",
+                                       "target_seed": {"x1": .2, "y1": .2, "x2": .4,
+                                                       "y2": .7, "score": .8,
+                                                       "query": "a tree trunk"}})
+            return SkillResult(status=SkillStatus.SUCCESS,
+                               result_code=("APPROACH_REACHED" if spec.name == "approach_target"
+                                            else "SUCCESS"), reason="ok")
+
+        runner = GoalExecutor(GoalPlanner(registry, lambda **_: plan), registry,
+            SkillOutcomeStore(":memory:"), profile=profile, game_id="sim",
+            execute_skill=execute, frame_provider=lambda: Image.new("RGB", (32, 24)),
+            stop_check=lambda: None, result_verifier=confirm_goal, max_replans=0,
+            skill_context=context)
+
+        runner.run("approach a tree trunk")
+
+        self.assertEqual(approach_context, [{}])
+
+    def test_search_seed_requires_matching_target_text(self):
+        result = {"status": "SUCCESS", "evidence": {
+            "target_text": "a tree trunk",
+            "target_seed": {"x1": .2, "y1": .2, "x2": .4, "y2": .7,
+                            "score": .8, "query": "a tree trunk"}}}
+
+        self.assertIsNone(GoalExecutor._handoff_target_seed(result, "a rock"))
+        self.assertIsNotNone(GoalExecutor._handoff_target_seed(result, " A TREE TRUNK "))
+
+    def test_local_recovery_hands_off_selected_target_to_approach(self):
+        registry = default_registry(profile=self.profile)
+        context = {}
+        observed = []
+        target_seed = {"x1": .2, "y1": .2, "x2": .4, "y2": .7,
+                       "score": .8, "query": "a tree trunk"}
+
+        def execute(spec, _args, _remaining):
+            observed.append((spec.name, dict(context)))
+            if spec.name == "search_target":
+                return SkillResult(status=SkillStatus.SUCCESS, result_code="TARGET_DETECTED",
+                                   reason="target_detected", evidence={
+                                       "target_text": "a tree trunk", "target_seed": target_seed})
+            return SkillResult(status=SkillStatus.SUCCESS,
+                               result_code=("APPROACH_REACHED" if spec.name == "approach_target"
+                                            else "SUCCESS"), reason="ok")
+
+        runner = GoalExecutor(GoalPlanner(registry, lambda **_: plan_for()), registry,
+            SkillOutcomeStore(":memory:"), profile=self.profile, game_id="sim",
+            execute_skill=execute, frame_provider=lambda: Image.new("RGB", (32, 24)),
+            stop_check=lambda: None, skill_context=context)
+
+        recovered, used, skill, _ = runner._recover_blocked_approach(
+            "approach a tree trunk", "a tree trunk", runner.clock(), 0)
+
+        self.assertEqual((recovered["status"], used, skill), ("SUCCESS", 3, "approach_target"))
+        self.assertEqual(observed[-1][0], "approach_target")
+        self.assertEqual(observed[-1][1]["approach_target_seed"], target_seed)
+
     def test_menu_skill_requires_profile_adapter_and_matching_expected_result(self):
         menu_profile = GameProfile(game_id="minecraft", ui_adapters=["world_selection"])
         planner = GoalPlanner(default_registry(), lambda **_: None)

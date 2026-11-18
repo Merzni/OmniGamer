@@ -107,7 +107,7 @@ def _approach_result(result: ApproachTargetResult) -> SkillResult:
 
 def execute_approach_target(args, *, capture, detector, controls, camera_guard,
                             game_id, stop_check=None, recorder=None, profile=None,
-                            settings=None, telemetry=None):
+                            settings=None, telemetry=None, initial_target=None):
     params = _validate(ApproachTargetParams, args)
     recorder = recorder or (SkillStepRecorder(telemetry, "approach_target", params.model_dump())
                             if telemetry else None)
@@ -126,6 +126,7 @@ def execute_approach_target(args, *, capture, detector, controls, camera_guard,
             recorder=recorder,
             settings=selected_settings,
             profile=profile,
+            initial_target=initial_target,
         ).run()
         return _approach_result(raw)
     return _run_recorded(recorder, run, controls=controls)

@@ -456,7 +456,8 @@ class GoalExecutor:
                  execute_skill, frame_provider, stop_check, dry_run=False,
                  max_replans=None, max_steps=None, input_action_budget=None,
                  run_id=None, clock=time.monotonic, result_verifier=None,
-                 logger=None, detector=None, menu_preview=None, skill_preflight=None):
+                 logger=None, detector=None, menu_preview=None, skill_preflight=None,
+                 skill_context=None):
         self.planner, self.registry, self.store = planner, registry, outcome_store
         self.profile, self.game_id = profile, game_id
         self.execute_skill, self.frame_provider, self.stop_check = execute_skill, frame_provider, stop_check
@@ -468,7 +469,22 @@ class GoalExecutor:
         self.run_id, self.clock, self.logger, self.detector = run_id or uuid4().hex, clock, logger, detector
         self.menu_preview = menu_preview
         self.skill_preflight = skill_preflight
+        self.skill_context = skill_context
         self.memory_reuse_count = 0
+
+    @staticmethod
+    def _handoff_target_seed(search_result, target_text):
+        """Return a search seed only when a successful result matches the next target."""
+        if not isinstance(search_result, dict) or search_result.get("status") != SkillStatus.SUCCESS.value:
+            return None
+        evidence = search_result.get("evidence")
+        if not isinstance(evidence, dict):
+            return None
+        normalize = lambda text: " ".join(str(text or "").casefold().split())
+        if not normalize(evidence.get("target_text")) or normalize(evidence.get("target_text")) != normalize(target_text):
+            return None
+        seed = evidence.get("target_seed")
+        return dict(seed) if isinstance(seed, dict) else None
 
     def _requires_mining_preflight(self, step, params):
         if step.skill != "interact_until_change" or self.profile is None:
@@ -727,6 +743,7 @@ class GoalExecutor:
         used = 0
         last_result = None
         last_skill = None
+        previous_skill = None
         last_state_hash = None
         for name, args in recovery:
             self.stop_check()
@@ -746,7 +763,13 @@ class GoalExecutor:
             params = spec.validate_args(args).model_dump(mode="json")
             begin = self.clock()
             last_skill = name
-            last_result = self._execute_skill(spec, params, available, begin)
+            skill_context = {}
+            if name == "approach_target" and previous_skill == "search_target":
+                seed = self._handoff_target_seed(last_result, target_text)
+                if seed:
+                    skill_context["approach_target_seed"] = seed
+            last_result = self._execute_skill(spec, params, available, begin, skill_context)
+            previous_skill = name
             duration = last_result.get("duration_seconds", max(0.0, self.clock() - begin))
             if name != "approach_target":
                 self.store.record(self.game_id, name, goal,
@@ -764,7 +787,10 @@ class GoalExecutor:
         frame = self.frame_provider()
         return GameMemory.compute_state_hash(frame) if hasattr(frame, "convert") else None
 
-    def _execute_skill(self, spec, params, available, begin):
+    def _execute_skill(self, spec, params, available, begin, skill_context=None):
+        if self.skill_context is not None:
+            self.skill_context.clear()
+            self.skill_context.update(skill_context or {})
         try:
             result = self.execute_skill(spec, params, available)
         except InterruptedError as exc:
@@ -792,6 +818,9 @@ class GoalExecutor:
                     "reason": f"skill_time_budget_exhausted: {exc}"[:300],
                     "evidence": evidence,
                     "duration_seconds": max(0.0, self.clock() - begin)}
+        finally:
+            if self.skill_context is not None:
+                self.skill_context.clear()
         return result.model_dump() if hasattr(result, "model_dump") else result
 
     def run(self, goal):
@@ -843,6 +872,8 @@ class GoalExecutor:
                              **self.planner.last_plan_metrics,
                              "request_count": len(self.planner.last_plan_metrics["request_durations_seconds"])})
             failure = ""
+            previous_step = None
+            previous_result = None
             for step_index, step in enumerate(plan.steps):
                 is_final_step = step_index == len(plan.steps) - 1
                 self.stop_check()
@@ -989,9 +1020,27 @@ class GoalExecutor:
                             else:
                                 self.stop_check()
                                 begin = self.clock()
-                                result = self._execute_skill(spec, params, available, begin)
+                                skill_context = {}
+                                if (step.skill == "approach_target" and step_index > 0
+                                        and plan.steps[step_index - 1].skill == "search_target"
+                                        and previous_step == "search_target"):
+                                    seed = self._handoff_target_seed(previous_result,
+                                                                     params.get("target_text"))
+                                    if seed:
+                                        skill_context["approach_target_seed"] = seed
+                                result = self._execute_skill(spec, params, available, begin,
+                                                             skill_context)
                     else:
-                        result = self._execute_skill(spec, params, available, begin)
+                        skill_context = {}
+                        if (step.skill == "approach_target" and step_index > 0
+                                and plan.steps[step_index - 1].skill == "search_target"
+                                and previous_step == "search_target"):
+                            seed = self._handoff_target_seed(previous_result,
+                                                             params.get("target_text"))
+                            if seed:
+                                skill_context["approach_target_seed"] = seed
+                        result = self._execute_skill(spec, params, available, begin,
+                                                     skill_context)
 
                     if not skip_verification:
                         verification_candidate = result.get("result_code") in {
@@ -1027,6 +1076,7 @@ class GoalExecutor:
                 if self.logger:
                     self.logger({"event": "skill_result", "skill": step.skill,
                                  "args": step.args, "result": result})
+                previous_step, previous_result = step.skill, result
                 steps_used += 1
                 self._steps_used = steps_used
                 if result.get("result_code") == "MENU_TARGET_PREVIEW_FAILED":

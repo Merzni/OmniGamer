@@ -115,6 +115,15 @@ def _valid_detection(response, profile):
     return boxes
 
 
+def _target_seed(boxes, target_text, queries, profile):
+    """Select a concrete search candidate using approach_target's query policy."""
+    from .approach_target import ApproachTargetSettings, select_target_candidates
+
+    candidates, _ = select_target_candidates(
+        boxes, target_text, queries, ApproachTargetSettings.from_profile(profile))
+    return max(candidates, key=lambda box: box["score"]) if candidates else None
+
+
 def move_pulse(direction, seconds, *, controls, profile, camera_guard, stop_check=None, recorder=None,
                capture=None):
     params = MovePulseParams(direction=direction, seconds=seconds)
@@ -216,7 +225,9 @@ def search_target(target_text, sweep, *, capture, detector, controls, camera_gua
         boxes = _valid_detection(response, profile)
         if boxes:
             evidence = {"target_text": params.target_text, "queries": queries,
-                        "boxes": boxes, "turns": index, "action": None}
+                        "boxes": boxes, "target_seed": _target_seed(
+                            boxes, params.target_text, queries, profile),
+                        "turns": index, "action": None}
             _emit(recorder, "search_target", index + 1, SkillStatus.SUCCESS,
                   "target_detected", evidence, frame, frame)
             return _result(SkillStatus.SUCCESS, "TARGET_DETECTED", "target_detected", evidence, started)
@@ -246,7 +257,9 @@ def search_target(target_text, sweep, *, capture, detector, controls, camera_gua
             boxes = _valid_detection(response, profile)
             if boxes:
                 evidence = {"target_text": params.target_text, "queries": queries,
-                            "boxes": boxes, "turns": max_turns, "vertical_turn": direction,
+                            "boxes": boxes, "target_seed": _target_seed(
+                                boxes, params.target_text, queries, profile),
+                            "turns": max_turns, "vertical_turn": direction,
                             "action": turn_result.evidence.get("action")}
                 _emit(recorder, "search_target", max_turns + 1, SkillStatus.SUCCESS,
                       "target_detected", evidence, frame, None)

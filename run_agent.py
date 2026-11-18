@@ -135,6 +135,7 @@ def main():
                 planner = GoalPlanner(registry, agent.request_goal_plan)
                 outcome_store = SkillOutcomeStore(":memory:" if args.dry_run else agent.memory.db_path)
                 input_action_budget = InputActionBudget(profile.motion_limits.max_actions)
+                skill_execution_context = {}
                 def execute_skill(spec, skill_args, remaining_seconds=None):
                     deadline = time.monotonic() + max(0.0, remaining_seconds or 0.0)
                     bounded_controls = BudgetControls(DeadlineControls(agent.controls, deadline),
@@ -167,7 +168,9 @@ def main():
                         if remaining_seconds is not None:
                             settings.max_seconds = min(settings.max_seconds, remaining_seconds)
                         return spec.executor(skill_args, detector=bounded_detector, game_id=agent.game_id,
-                                             telemetry=agent.telemetry, settings=settings, **shared)
+                                             telemetry=agent.telemetry, settings=settings,
+                                             initial_target=skill_execution_context.get(
+                                                 "approach_target_seed"), **shared)
                     if spec.name in {"search_target", "wait_for_condition"}:
                         shared["detector"] = bounded_detector
                     if spec.name == "wait_for_condition":
@@ -256,6 +259,7 @@ def main():
                     logger=record_goal_event, detector=detector,
                     menu_preview=preview_menu_target if args.dry_run and not args.frame_dir else None,
                     skill_preflight=preflight_mining_skill,
+                    skill_context=skill_execution_context,
                 )
                 try:
                     result = executor.run(args.goal)

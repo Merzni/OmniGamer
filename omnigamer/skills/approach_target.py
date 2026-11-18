@@ -110,6 +110,67 @@ def box_metrics(box):
     return height, center_x - 0.5, width * height
 
 
+def _content_words(text):
+    stop_words = {"a", "an", "the", "of", "to", "in", "on", "with"}
+    words = set()
+    current = []
+    for char in str(text).casefold():
+        if char.isalnum():
+            current.append(char)
+        elif current:
+            word = "".join(current)
+            if word not in stop_words:
+                words.add(word)
+            current = []
+    if current:
+        word = "".join(current)
+        if word not in stop_words:
+            words.add(word)
+    return words
+
+
+def select_target_candidates(boxes, target_text, queries, settings):
+    """Apply the same exact-query/specific-fallback policy to search and approach."""
+    valid = []
+    for item in boxes:
+        try:
+            box = {key: float(item[key]) for key in ("x1", "y1", "x2", "y2", "score")}
+            if (not all(math.isfinite(value) for value in box.values())
+                    or box["score"] < settings.score_min or box["x2"] <= box["x1"]
+                    or box["y2"] <= box["y1"]):
+                continue
+            if (box["x1"] < 0 or box["y1"] < 0 or box["x2"] > 1 or box["y2"] > 1
+                    or (box["x2"] - box["x1"]) * (box["y2"] - box["y1"])
+                    > settings.max_box_area):
+                continue
+            box["query"] = str(item.get("query", target_text))
+            valid.append(box)
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    primary = [box for box in valid if box["query"] == target_text]
+    if primary:
+        return primary, "primary"
+    if len(queries) <= 1:
+        return [], "primary"
+    selected = [box for box in valid if box["query"] in queries[1:]]
+    selected = [box for box in selected
+                if not ((box["x2"] - box["x1"]) > 0.5 or box["y2"] < 1 / 3
+                        or ((box["x2"] - box["x1"]) > 0.65
+                            and (box["y2"] - box["y1"]) < 0.25))]
+    if not selected:
+        return [], "primary"
+    target_words = _content_words(target_text)
+    if target_words:
+        def specificity(box):
+            query_words = _content_words(box["query"])
+            return len(target_words & query_words), -len(query_words)
+        best_specificity = max(specificity(box) for box in selected)
+        if best_specificity[0] > 0:
+            selected = [box for box in selected if specificity(box) == best_specificity]
+    return selected, "fallback_query"
+
+
 def action_for_box(box, settings=None, previous_box=None):
     """Pure no-input action classification used by the saved-frame dry run."""
     settings = settings or ApproachTargetSettings()
@@ -134,7 +195,7 @@ def action_for_box(box, settings=None, previous_box=None):
 class ApproachTargetSkill:
     def __init__(self, capture, target_text, detector, controls, camera_guard, game_id,
                  stop_check=None, recorder=None, settings=None, calibration_path=None,
-                 clock=None, sleep=None, profile=None):
+                 clock=None, sleep=None, profile=None, initial_target=None):
         self.capture = capture
         self.target_text = " ".join(str(target_text or "").split()).strip()
         if not self.target_text:
@@ -180,7 +241,30 @@ class ApproachTargetSkill:
         self._last_reach_center = None
         self._close_target_held_remaining = 0
         self._close_target_held_active = False
+        self._initial_target = self._validated_initial_target(initial_target)
+        if self._initial_target is not None:
+            self._last_box = dict(self._initial_target)
+            self._last_valid_box = dict(self._initial_target)
+            self._last_center = ((self._initial_target["x1"] + self._initial_target["x2"]) / 2,
+                                 (self._initial_target["y1"] + self._initial_target["y2"]) / 2)
         self._calibration = self._read_calibration()
+
+    def _validated_initial_target(self, target):
+        if not isinstance(target, dict):
+            return None
+        try:
+            box = {key: float(target[key]) for key in ("x1", "y1", "x2", "y2", "score")}
+            if (not all(math.isfinite(value) for value in box.values())
+                    or not 0 <= box["x1"] < box["x2"] <= 1
+                    or not 0 <= box["y1"] < box["y2"] <= 1
+                    or box["score"] < self.settings.score_min
+                    or (box["x2"] - box["x1"]) * (box["y2"] - box["y1"])
+                    > self.settings.max_box_area):
+                return None
+            box["query"] = str(target.get("query", self.target_text))
+            return box
+        except (KeyError, TypeError, ValueError):
+            return None
 
     def _read_calibration(self):
         try:
@@ -242,30 +326,8 @@ class ApproachTargetSkill:
                 valid.append(box)
             except (KeyError, TypeError, ValueError):
                 continue
-        primary = [box for box in valid if box["query"] == self.target_text]
-        selected = primary
-        source = "primary"
-        if not selected and len(queries) > 1:
-            selected = []
-            for box in valid:
-                if box["query"] not in queries[1:]:
-                    continue
-                width = box["x2"] - box["x1"]
-                height = box["y2"] - box["y1"]
-                if width > 0.5 or box["y2"] < 1 / 3 or (width > 0.65 and height < 0.25):
-                    continue
-                selected.append(box)
-            if selected:
-                source = "fallback_query"
-                target_words = self._content_words(self.target_text)
-                if target_words:
-                    def specificity(box):
-                        query_words = self._content_words(box["query"])
-                        return (len(target_words & query_words), -len(query_words))
-                    best_specificity = max(specificity(box) for box in selected)
-                    if best_specificity[0] > 0:
-                        selected = [box for box in selected
-                                    if specificity(box) == best_specificity]
+        selected, source = select_target_candidates(
+            valid, self.target_text, queries, self.settings)
         return {"boxes": selected, "raw_boxes": raw_boxes, "queries": queries,
                 "selected_query_source": source,
                 "preprocess": response.get("preprocess"),
@@ -274,22 +336,7 @@ class ApproachTargetSkill:
 
     @staticmethod
     def _content_words(text):
-        stop_words = {"a", "an", "the", "of", "to", "in", "on", "with"}
-        words = set()
-        current = []
-        for char in str(text).casefold():
-            if char.isalnum():
-                current.append(char)
-            elif current:
-                word = "".join(current)
-                if word not in stop_words:
-                    words.add(word)
-                current = []
-        if current:
-            word = "".join(current)
-            if word not in stop_words:
-                words.add(word)
-        return words
+        return _content_words(text)
 
     def _select(self, detection):
         boxes = detection.get("boxes", []) if detection else []

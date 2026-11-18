@@ -123,6 +123,16 @@ class ApproachTargetTests(unittest.TestCase):
         self.assertTrue(controls.released)
         self.assertEqual(detector.calls, 3)
 
+    def test_initial_target_seed_tracks_nearby_candidate_over_higher_score_decoy(self):
+        seed = {**box(0.5, 0.2), "query": "a tree trunk"}
+        nearby = {**box(0.54, 0.2, score=0.55), "query": "a tree trunk"}
+        decoy = {**box(0.73, 0.2, score=0.99), "query": "a tree trunk"}
+        skill, _, _ = self.make_skill([[]], initial_target=seed)
+
+        selected = skill._select({"boxes": [decoy, nearby]})
+
+        self.assertAlmostEqual((selected["x1"] + selected["x2"]) / 2, 0.54)
+
     def test_camera_free_profile_rejects_approach_before_capture_or_input(self):
         capture = FakeCapture()
         detector = FakeDetector([[box(0.5, 0.2)]])

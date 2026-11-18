@@ -110,6 +110,22 @@ class BasicSkillTests(unittest.TestCase):
         self.assertEqual(result.result_code, "TARGET_DETECTED")
         self.assertEqual(detector.calls, 1)
         self.assertEqual(controls.calls, [])
+        self.assertEqual(result.evidence["target_seed"]["query"], "a tree trunk")
+
+    def test_search_seed_prefers_exact_target_query_over_higher_score_fallback(self):
+        frame = Image.new("RGB", (20, 20))
+        detector = FakeDetector([{"boxes": [
+            {"x1": .1, "y1": .2, "x2": .4, "y2": .7,
+             "score": .99, "query": "a tree"},
+            {"x1": .5, "y1": .2, "x2": .8, "y2": .7,
+             "score": .55, "query": "a tree trunk"},
+        ]}])
+        result = search_target("a tree trunk", 6, capture=FakeCapture([frame]), detector=detector,
+                               controls=FakeControls(), camera_guard=self.guard,
+                               profile=self.profile)
+        self.assertEqual(result.status, SkillStatus.SUCCESS)
+        self.assertEqual(result.evidence["target_seed"]["query"], "a tree trunk")
+        self.assertAlmostEqual(result.evidence["target_seed"]["x1"], .5)
 
     def test_search_is_bounded_and_reports_detector_failure(self):
         frame = Image.new("RGB", (20, 20))
