@@ -644,6 +644,35 @@ class GoalPlannerTests(unittest.TestCase):
             self.assertFalse(any(row["event"] == "would_send" for row in logs))
             self.assertTrue(any(row["event"] == "menu_preview_failed" for row in logs))
 
+    def test_dry_run_menu_preview_preserves_emergency_abort(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = GameProfile(game_id="minecraft", ui_adapters=["world_selection"],
+                motion_limits={"max_run_seconds": 20, "max_actions": 3})
+            args = {"target_label": "Одиночная игра", "intent": "Open world list",
+                    "expected_result": "World selection screen appears"}
+            plan = {"steps": [{"skill": "click_menu_target", "args": args,
+                "expected_result": "World selection screen appears",
+                "success_check": "world selection menu is visible"}]}
+            planner = GoalPlanner(default_registry(profile), lambda **_: plan)
+            frame = Image.new("RGB", (800, 600))
+            logs = []
+
+            def interrupted_preview(*_):
+                raise InterruptedError("Emergency stop requested (F12)")
+
+            executor = GoalExecutor(planner, default_registry(profile),
+                SkillOutcomeStore(Path(tmp) / "outcomes.db"), profile=profile, game_id="minecraft",
+                execute_skill=lambda *_: self.fail("dry-run executed input skill"),
+                frame_provider=lambda: frame, stop_check=lambda: None,
+                dry_run=True, logger=logs.append, menu_preview=interrupted_preview)
+
+            result = executor.run("Добудь дерево")
+
+            self.assertEqual(result["status"], "ABORT")
+            self.assertIn("Emergency stop requested", result["reason"])
+            self.assertFalse(any(row["event"] == "would_send" for row in logs))
+            self.assertTrue(any(row["event"] == "menu_preview_aborted" for row in logs))
+
     def test_goal_telemetry_counts_only_exact_verified_example_reuse_for_same_goal(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = SkillOutcomeStore(Path(tmp) / "outcomes.db")

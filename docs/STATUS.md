@@ -304,3 +304,9 @@ Live `--dry-run` показывал menu-параметры плана, но о�
 Эксперимент с candidate montage 640 px занял 41.337 с, но вернул несовместимый bbox; его размер не оставлен в коде. Prompt теперь явно требует привязывать bbox к тому же numbered candidate на первом изображении. Следующий live dry-run с montage 960 px принял тот же видимый target: «Одиночная игра», confidence 0.95, normalized `(530,438)`, screen `(848,407)`, `input_actions=0`; grounding занял 49.516 с. Несколько отказов и один успех не дают оценку надёжности или latency-выигрыша. Переход в игре не выполнялся; `OpenInputDesktop` ранее отказал с WinError 5.
 
 После структурирования pre-input отказов: полный набор — 335 unittest, pyflakes без замечаний.
+
+## Аварийное прерывание menu preview и повторная live-проверка (2026-11-18)
+
+Статический review обнаружил, что dry-run menu preview ловил `InterruptedError` от F12 общим обработчиком ошибок локализации. Теперь это завершает goal как `ABORT`, пишет `menu_preview_aborted` и не создаёт `would_send`; обычные ошибки grounding остаются `UNCONFIRMED`. Регрессия проверяет статус и отсутствие preview ввода. Полный набор: 336 unittest; `pyflakes` без замечаний.
+
+На открытом окне `Minecraft* 26.3` оба уже работающих локальных сервиса ответили `status=ok`; detector сообщил OWLv2 CUDA FP16. Live `--goal "Добудь дерево" --dry-run` за 36.172 с выбрал `click_menu_target` / «Одиночная игра»; preview вернул `main_menu/default`, confidence 0.95, normalized `(530,438)`, screen `(848,407)`, `input_actions=0`. Это новая проверка preview, а не клика или перехода. `OpenInputDesktop` ранее отказал с WinError 5; ввод не отправлялся.

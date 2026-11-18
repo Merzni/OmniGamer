@@ -686,6 +686,16 @@ class GoalExecutor:
                                 reason = preview.get("reason") if isinstance(preview, dict) else ""
                                 raise ValueError(reason or "Menu preview did not return a grounded target")
                             resolved["grounded_target"] = preview
+                        except InterruptedError as exc:
+                            # Preserve the emergency-stop signal; an interrupted
+                            # preview is an abort, not a localization failure.
+                            preview_failed = True
+                            result = {"status": "ABORT", "result_code": "ABORT",
+                                      "reason": str(exc)[:300],
+                                      "duration_seconds": max(0.0, self.clock() - begin)}
+                            if self.logger:
+                                self.logger({"event": "menu_preview_aborted", "skill": step.skill,
+                                             "reason": result["reason"]})
                         except Exception as exc:
                             preview_failed = True
                             result = {"status": SkillStatus.UNCONFIRMED.value,
