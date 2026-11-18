@@ -127,6 +127,25 @@ class BasicSkillTests(unittest.TestCase):
         self.assertEqual(result.evidence["target_seed"]["query"], "a tree trunk")
         self.assertAlmostEqual(result.evidence["target_seed"]["x1"], .5)
 
+    def test_search_seed_prefers_crosshair_candidate_when_exact_scores_are_close(self):
+        frame = Image.new("RGB", (20, 20))
+        detector = FakeDetector([{"boxes": [
+            {"x1": .2668, "y1": .3888, "x2": .2825, "y2": .5235,
+             "score": .2824, "query": "a tree trunk"},
+            {"x1": .4341, "y1": 0, "x2": .5201, "y2": .8956,
+             "score": .2724, "query": "a tree trunk"},
+            {"x1": .6974, "y1": .4366, "x2": .7122, "y2": .4982,
+             "score": .2513, "query": "a tree trunk"},
+        ]}])
+
+        result = search_target("a tree trunk", 6, capture=FakeCapture([frame]),
+                               detector=detector, controls=FakeControls(),
+                               camera_guard=self.guard, profile=self.profile)
+
+        seed = result.evidence["target_seed"]
+        self.assertEqual(result.status, SkillStatus.SUCCESS)
+        self.assertAlmostEqual((seed["x1"] + seed["x2"]) / 2, .4771, places=3)
+
     def test_search_is_bounded_and_reports_detector_failure(self):
         frame = Image.new("RGB", (20, 20))
         controls = FakeControls()

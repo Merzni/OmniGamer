@@ -171,6 +171,19 @@ def select_target_candidates(boxes, target_text, queries, settings):
     return selected, "fallback_query"
 
 
+def select_initial_candidate(boxes, score_margin):
+    """Break near-equal initial detector scores toward the active crosshair."""
+    if not boxes:
+        return None
+    best_score = max(float(box["score"]) for box in boxes)
+    finalists = [box for box in boxes
+                 if best_score - float(box["score"]) <= score_margin]
+    return min(finalists, key=lambda box: (
+        math.hypot((float(box["x1"]) + float(box["x2"])) / 2 - 0.5,
+                   (float(box["y1"]) + float(box["y2"])) / 2 - 0.5),
+        -float(box["score"])))
+
+
 def action_for_box(box, settings=None, previous_box=None):
     """Pure no-input action classification used by the saved-frame dry run."""
     settings = settings or ApproachTargetSettings()
@@ -346,7 +359,7 @@ class ApproachTargetSkill:
             self._reacquire_candidate = None
             return None
         if self._last_center is None:
-            selected = max(boxes, key=lambda item: item["score"])
+            selected = select_initial_candidate(boxes, self.settings.track_ambiguity_margin)
         else:
             previous = self._last_valid_box
             eligible = []

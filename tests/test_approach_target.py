@@ -133,6 +133,21 @@ class ApproachTargetTests(unittest.TestCase):
 
         self.assertAlmostEqual((selected["x1"] + selected["x2"]) / 2, 0.54)
 
+    def test_initial_near_score_candidates_prefer_the_crosshair_target(self):
+        candidates = [
+            {"x1": 0.2668439716, "y1": 0.3888561321, "x2": 0.2825059102,
+             "y2": 0.5235849057, "score": 0.2823940516, "query": "a tree trunk"},
+            {"x1": 0.4341016548, "y1": 0.0, "x2": 0.5200945626,
+             "y2": 0.8956367925, "score": 0.2724114954, "query": "a tree trunk"},
+            {"x1": 0.6973995272, "y1": 0.4366155660, "x2": 0.7121749409,
+             "y2": 0.4982311321, "score": 0.2512800694, "query": "a tree trunk"},
+        ]
+        skill, _, _ = self.make_skill([[]])
+
+        selected = skill._select({"boxes": candidates})
+
+        self.assertEqual(selected, candidates[1])
+
     def test_camera_free_profile_rejects_approach_before_capture_or_input(self):
         capture = FakeCapture()
         detector = FakeDetector([[box(0.5, 0.2)]])

@@ -117,11 +117,12 @@ def _valid_detection(response, profile):
 
 def _target_seed(boxes, target_text, queries, profile):
     """Select a concrete search candidate using approach_target's query policy."""
-    from .approach_target import ApproachTargetSettings, select_target_candidates
+    from .approach_target import (ApproachTargetSettings, select_initial_candidate,
+                                  select_target_candidates)
 
-    candidates, _ = select_target_candidates(
-        boxes, target_text, queries, ApproachTargetSettings.from_profile(profile))
-    return max(candidates, key=lambda box: box["score"]) if candidates else None
+    settings = ApproachTargetSettings.from_profile(profile)
+    candidates, _ = select_target_candidates(boxes, target_text, queries, settings)
+    return select_initial_candidate(candidates, settings.track_ambiguity_margin)
 
 
 def move_pulse(direction, seconds, *, controls, profile, camera_guard, stop_check=None, recorder=None,
