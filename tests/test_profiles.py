@@ -15,6 +15,7 @@ class GameProfileTests(unittest.TestCase):
         self.assertEqual(profile.game_id, "minecraft")
         self.assertEqual(profile.move_keys["forward"], "w")
         self.assertEqual(profile.actions["primary_hold"].value, "left")
+        self.assertEqual(profile.mine_actions, ["primary_hold"])
         self.assertEqual(profile.detector_queries["tree_trunk"], ["a tree trunk", "a tree"])
         self.assertIn("hotbar", profile.regions)
 
@@ -26,6 +27,7 @@ class GameProfileTests(unittest.TestCase):
             GameProfile(game_id="menu", main_menu_target_transitions={"Single Player": "gameplay"})
 
     def test_crosshair_target_precondition_is_explicitly_profiled(self):
+        self.assertEqual(GameProfile(game_id="generic").mine_actions, [])
         self.assertFalse(GameProfile(game_id="generic").mine_requires_target_at_crosshair)
         self.assertFalse(GameProfile(game_id="generic").mine_requires_grounded_level_view)
         self.assertTrue(GameProfile(game_id="legacy-first-person", camera_type="first_person")
@@ -41,6 +43,16 @@ class GameProfileTests(unittest.TestCase):
                             encoding="utf-8")
             profile = load_profile("mining-game", path)
             self.assertTrue(profile.mine_requires_target_at_crosshair)
+
+    def test_mine_actions_must_reference_unique_configured_actions(self):
+        action = {"primary_hold": {"kind": "mouse", "value": "left", "duration": 0.1}}
+        profile = GameProfile(game_id="mining", actions=action, mine_actions=["primary_hold"])
+        self.assertEqual(profile.mine_actions, ["primary_hold"])
+        with self.assertRaisesRegex(ValueError, "reference configured actions"):
+            GameProfile(game_id="mining", actions=action, mine_actions=["missing"])
+        with self.assertRaisesRegex(ValueError, "duplicates"):
+            GameProfile(game_id="mining", actions=action,
+                        mine_actions=["primary_hold", "primary_hold"])
 
     def test_explicit_profile_requires_matching_game_id(self):
         with tempfile.TemporaryDirectory() as temp:

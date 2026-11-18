@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import time
 from copy import deepcopy
@@ -25,6 +26,7 @@ OUTCOME_SUCCESS_CODES = frozenset({
 CAMERA_DEPENDENT_SKILLS = frozenset({"approach_target", "search_target", "turn"})
 MENU_UNSAFE_SKILLS = frozenset({"interact_until_change", "move_pulse", "turn",
                                 "approach_target", "search_target"})
+MINING_PREFLIGHT_STABLE_SCREEN_DELTA = 0.02
 
 
 def _verified_example(args_json, expected_result, success_check):
@@ -60,15 +62,20 @@ class PlanningError(RuntimeError):
     """A plan could not be obtained and validated; execution must not begin."""
 
 
+def skill_time_remaining(deadline, clock=time.monotonic):
+    remaining = deadline - clock()
+    if remaining <= 0:
+        raise SkillDeadlineExceeded("skill time budget exhausted")
+    return remaining
+
+
 class DeadlineControls:
     """Clamp held-input durations to the remaining skill/run deadline."""
     def __init__(self, controls, deadline, clock=time.monotonic):
         self.controls, self.deadline, self.clock = controls, deadline, clock
 
     def _duration(self, requested):
-        remaining = self.deadline - self.clock()
-        if remaining <= 0:
-            raise SkillDeadlineExceeded("skill time budget exhausted")
+        remaining = skill_time_remaining(self.deadline, self.clock)
         return min(float(requested), remaining)
 
     def press_key(self, key, duration):
@@ -85,8 +92,7 @@ class DeadlineControls:
                                    hold_time=self._duration(hold_time))
 
     def move_camera(self, dx, dy):
-        if self.deadline <= self.clock():
-            raise SkillDeadlineExceeded("skill time budget exhausted")
+        skill_time_remaining(self.deadline, self.clock)
         return self.controls.move_camera(dx, dy)
 
     def release_all(self):
@@ -150,9 +156,7 @@ class DeadlineDetector:
         return getattr(self.detector, name)
 
     def detect(self, image, queries, score_min=None, max_boxes=None):
-        remaining = self.deadline - self.clock()
-        if remaining <= 0:
-            raise SkillDeadlineExceeded("skill time budget exhausted")
+        remaining = skill_time_remaining(self.deadline, self.clock)
         return self.detector.detect(image, queries, score_min=score_min, max_boxes=max_boxes,
                                     timeout=remaining)
 
@@ -436,7 +440,7 @@ class GoalExecutor:
                  execute_skill, frame_provider, stop_check, dry_run=False,
                  max_replans=None, max_steps=None, input_action_budget=None,
                  run_id=None, clock=time.monotonic, result_verifier=None,
-                 logger=None, detector=None, menu_preview=None):
+                 logger=None, detector=None, menu_preview=None, skill_preflight=None):
         self.planner, self.registry, self.store = planner, registry, outcome_store
         self.profile, self.game_id = profile, game_id
         self.execute_skill, self.frame_provider, self.stop_check = execute_skill, frame_provider, stop_check
@@ -447,7 +451,132 @@ class GoalExecutor:
         self.result_verifier = result_verifier
         self.run_id, self.clock, self.logger, self.detector = run_id or uuid4().hex, clock, logger, detector
         self.menu_preview = menu_preview
+        self.skill_preflight = skill_preflight
         self.memory_reuse_count = 0
+
+    def _requires_mining_preflight(self, step, params):
+        if step.skill != "interact_until_change" or self.profile is None:
+            return False
+        if not (getattr(self.profile, "mine_requires_grounded_level_view", False)
+                or getattr(self.profile, "mine_requires_target_at_crosshair", False)):
+            return False
+        mine_actions = set(getattr(self.profile, "mine_actions", ()) or ())
+        return params.get("action") in mine_actions
+
+    def _check_mining_preflight(self, goal, step, frame, timeout_seconds):
+        """Require fresh, confident profile-specific visual facts before mining input."""
+        started = self.clock()
+        if self.skill_preflight is None:
+            return ({"status": SkillStatus.UNCONFIRMED.value,
+                     "result_code": "MINING_PREFLIGHT_UNAVAILABLE",
+                     "reason": "mining_preflight_callback_unavailable",
+                     "evidence": {"failure_stage": "mining_preflight",
+                                  "postcondition": "not_checked_no_input"},
+                     "duration_seconds": 0.0}, None, None)
+        try:
+            assessment = self.skill_preflight(goal, step, frame, timeout_seconds)
+        except InterruptedError as exc:
+            return ({"status": SkillStatus.ABORT.value, "result_code": "ABORT",
+                     "reason": str(exc)[:300],
+                     "evidence": {"failure_stage": "mining_preflight",
+                                  "postcondition": "not_checked_no_input"},
+                     "duration_seconds": max(0.0, self.clock() - started)}, None, None)
+        except TimeoutError as exc:
+            return ({"status": SkillStatus.UNCONFIRMED.value,
+                     "result_code": "MINING_PREFLIGHT_TIMEOUT",
+                     "reason": f"{type(exc).__name__}: {exc}"[:300],
+                     "evidence": {"failure_stage": "mining_preflight",
+                                  "postcondition": "not_checked_no_input"},
+                     "duration_seconds": max(0.0, self.clock() - started)}, None, None)
+        except Exception as exc:
+            return ({"status": SkillStatus.UNCONFIRMED.value,
+                     "result_code": "MINING_PREFLIGHT_ERROR",
+                     "reason": f"{type(exc).__name__}: {exc}"[:300],
+                     "evidence": {"failure_stage": "mining_preflight",
+                                  "postcondition": "not_checked_no_input"},
+                     "duration_seconds": max(0.0, self.clock() - started)}, None, None)
+
+        def value(source, name, default=None):
+            if isinstance(source, dict):
+                return source.get(name, default)
+            return getattr(source, name, default)
+
+        after = value(assessment, "after")
+        try:
+            confidence = float(value(assessment, "confidence", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        verdict = value(assessment, "result", "unknown")
+        usable = bool(value(assessment, "usable", False))
+        evidence = {"failure_stage": "mining_preflight",
+                    "confidence": confidence, "assessment_result": verdict,
+                    "usable": usable,
+                    "evidence": str(value(assessment, "evidence", ""))[:500],
+                    "uncertainty": str(value(assessment, "uncertainty", ""))[:300],
+                    "facts": {name: value(after, name) for name in
+                              ("scene", "pitch", "safe_footing", "target_at_crosshair")}}
+        if (not usable or not math.isfinite(confidence) or confidence < 0.85
+                or verdict == "regressed" or after is None):
+            return ({"status": SkillStatus.UNCONFIRMED.value,
+                     "result_code": "MINING_PREFLIGHT_UNCONFIRMED",
+                     "reason": "mining_safety_facts_not_confident",
+                     "evidence": {**evidence, "postcondition": "not_checked_no_input"},
+                     "duration_seconds": max(0.0, self.clock() - started)}, None, evidence)
+
+        requirements = []
+        blocked, unknown = [], []
+        if (getattr(self.profile, "mine_requires_grounded_level_view", False)
+                or getattr(self.profile, "mine_requires_target_at_crosshair", False)):
+            scene = value(after, "scene", "unknown")
+            if scene != "gameplay":
+                (blocked if scene in {"menu", "loading"} else unknown).append("scene_not_gameplay")
+        if getattr(self.profile, "mine_requires_grounded_level_view", False):
+            requirements.extend(("pitch_level", "safe_footing"))
+            pitch, footing = value(after, "pitch"), value(after, "safe_footing")
+            if pitch != "level":
+                (blocked if pitch in {"up", "down"} else unknown).append("pitch_not_level")
+            if footing is not True:
+                (blocked if footing is False else unknown).append("safe_footing_unconfirmed")
+        if getattr(self.profile, "mine_requires_target_at_crosshair", False):
+            requirements.append("target_at_crosshair")
+            target_at_crosshair = value(after, "target_at_crosshair")
+            if target_at_crosshair is not True:
+                (blocked if target_at_crosshair is False else unknown).append(
+                    "target_at_crosshair_unconfirmed")
+
+        evidence.update(requirements=requirements, blocked_conditions=blocked,
+                        unknown_conditions=unknown)
+        if blocked or unknown:
+            status = SkillStatus.FAILED.value if blocked else SkillStatus.UNCONFIRMED.value
+            code = "MINING_PREFLIGHT_BLOCKED" if blocked else "MINING_PREFLIGHT_UNCONFIRMED"
+            reason = ",".join(blocked + unknown)
+            return ({"status": status, "result_code": code, "reason": reason,
+                     "evidence": {**evidence, "postcondition": "not_checked_no_input"},
+                     "duration_seconds": max(0.0, self.clock() - started)}, None, evidence)
+
+        if not hasattr(frame, "convert"):
+            return ({"status": SkillStatus.UNCONFIRMED.value,
+                     "result_code": "MINING_PREFLIGHT_UNCONFIRMED",
+                     "reason": "preflight_frame_unavailable_for_staleness_check",
+                     "evidence": {**evidence, "postcondition": "not_checked_no_input"},
+                     "duration_seconds": max(0.0, self.clock() - started)}, None, evidence)
+        fresh_frame = self.frame_provider()
+        if not hasattr(fresh_frame, "convert"):
+            return ({"status": SkillStatus.UNCONFIRMED.value,
+                     "result_code": "MINING_PREFLIGHT_UNCONFIRMED",
+                     "reason": "fresh_frame_unavailable_after_preflight",
+                     "evidence": {**evidence, "postcondition": "not_checked_no_input"},
+                     "duration_seconds": max(0.0, self.clock() - started)}, None, evidence)
+        screen_delta = GameMemory.compute_screen_delta(frame, fresh_frame)
+        evidence["screen_delta_after_preflight"] = screen_delta
+        evidence["screen_delta_limit"] = MINING_PREFLIGHT_STABLE_SCREEN_DELTA
+        if screen_delta >= MINING_PREFLIGHT_STABLE_SCREEN_DELTA:
+            return ({"status": SkillStatus.UNCONFIRMED.value,
+                     "result_code": "STALE_MINING_PREFLIGHT",
+                     "reason": "screen_changed_during_mining_preflight",
+                     "evidence": {**evidence, "postcondition": "not_checked_no_input"},
+                     "duration_seconds": max(0.0, self.clock() - started)}, None, evidence)
+        return None, fresh_frame, evidence
 
     @staticmethod
     def _memory_reuse_metrics(goal, outcomes, plan):
@@ -801,30 +930,77 @@ class GoalExecutor:
                     verification_before = (step_frame if self.result_verifier and
                                            (step.skill in {"interact_until_change", "click_menu_target"} or is_final_step)
                                            else None)
-                    result = self._execute_skill(spec, params, available, begin)
-                    verification_candidate = result.get("result_code") in {
-                        "REGION_CHANGE_UNCONFIRMED", "SUCCESS_REGION_CHANGE",
-                        "INTERACTION_OUTCOME_UNCONFIRMED", "MENU_ACTION_UNCONFIRMED"}
-                    verify_final = is_final_step and result.get("status") == SkillStatus.SUCCESS.value
-                    if (step.skill in {"interact_until_change", "click_menu_target"}
-                            and verification_candidate) or verify_final:
-                        verification_after = self.frame_provider() if self.result_verifier else None
-                        verification_budget = self.profile.motion_limits.max_run_seconds - (
-                            self.clock() - started)
-                        result = self._verify_result(step, result, verification_before,
-                                                     verification_after, verification_budget,
-                                                     force=verify_final)
-                    elif (not is_final_step and result.get("status") == SkillStatus.SUCCESS.value
-                          and result.get("result_code") not in OUTCOME_SUCCESS_CODES):
-                        # Low-level commands report that input was sent, not that the
-                        # predicted transition happened. Do not execute the next
-                        # preplanned step until its visible postcondition is confirmed.
-                        verification_after = self.frame_provider()
-                        verification_budget = self.profile.motion_limits.max_run_seconds - (
-                            self.clock() - started)
-                        result = self._verify_result(
-                            step, result, step_frame, verification_after, verification_budget,
-                            force=True, scope="plan_transition")
+                    skip_verification = False
+                    if self._requires_mining_preflight(step, params):
+                        preflight_result, checked_frame, preflight_evidence = (
+                            self._check_mining_preflight(goal, step, step_frame, available))
+                        if self.logger:
+                            self.logger({"event": "skill_preflight", "skill": step.skill,
+                                         "result": preflight_result or {
+                                             "status": "PASSED",
+                                             "result_code": "MINING_PREFLIGHT_PASSED",
+                                             "reason": "profile_mining_conditions_confirmed",
+                                             "evidence": preflight_evidence}})
+                        if preflight_result is not None:
+                            result = preflight_result
+                            skip_verification = True
+                        elif has_profile_menu_layout(checked_frame, self.profile):
+                            result = {"status": SkillStatus.FAILED.value,
+                                      "result_code": "STALE_MENU_STATE",
+                                      "reason": "menu_appeared_during_mining_preflight",
+                                      "evidence": {"failure_stage": "post_mining_preflight_menu_recheck",
+                                                   "input_actions": 0,
+                                                   "postcondition": "not_checked_no_input"},
+                                      "duration_seconds": max(0.0, self.clock() - begin)}
+                            skip_verification = True
+                        else:
+                            step_frame = checked_frame
+                            verification_before = step_frame if self.result_verifier else None
+                            step_state_hash = (GameMemory.compute_state_hash(step_frame)
+                                               if hasattr(step_frame, "convert") else None)
+                            remaining = max(0.0, self.profile.motion_limits.max_run_seconds - (
+                                self.clock() - started))
+                            available = min(remaining, float(spec.timeout_seconds))
+                            if available <= 0:
+                                result = {"status": SkillStatus.FAILED.value,
+                                          "result_code": "SKILL_TIMEOUT",
+                                          "reason": "time_budget_exhausted_before_mining_input",
+                                          "evidence": {"failure_stage": "mining_preflight",
+                                                       "input_actions": 0,
+                                                       "postcondition": "not_checked_no_input"},
+                                          "duration_seconds": max(0.0, self.clock() - begin)}
+                                skip_verification = True
+                            else:
+                                self.stop_check()
+                                begin = self.clock()
+                                result = self._execute_skill(spec, params, available, begin)
+                    else:
+                        result = self._execute_skill(spec, params, available, begin)
+
+                    if not skip_verification:
+                        verification_candidate = result.get("result_code") in {
+                            "REGION_CHANGE_UNCONFIRMED", "SUCCESS_REGION_CHANGE",
+                            "INTERACTION_OUTCOME_UNCONFIRMED", "MENU_ACTION_UNCONFIRMED"}
+                        verify_final = is_final_step and result.get("status") == SkillStatus.SUCCESS.value
+                        if (step.skill in {"interact_until_change", "click_menu_target"}
+                                and verification_candidate) or verify_final:
+                            verification_after = self.frame_provider() if self.result_verifier else None
+                            verification_budget = self.profile.motion_limits.max_run_seconds - (
+                                self.clock() - started)
+                            result = self._verify_result(step, result, verification_before,
+                                                         verification_after, verification_budget,
+                                                         force=verify_final)
+                        elif (not is_final_step and result.get("status") == SkillStatus.SUCCESS.value
+                              and result.get("result_code") not in OUTCOME_SUCCESS_CODES):
+                            # Low-level commands report that input was sent, not that the
+                            # predicted transition happened. Do not execute the next
+                            # preplanned step until its visible postcondition is confirmed.
+                            verification_after = self.frame_provider()
+                            verification_budget = self.profile.motion_limits.max_run_seconds - (
+                                self.clock() - started)
+                            result = self._verify_result(
+                                step, result, step_frame, verification_after, verification_budget,
+                                force=True, scope="plan_transition")
                 status = result.get("status", "FAILED")
                 duration = result.get("duration_seconds", max(0.0, self.clock() - begin))
                 if not self.dry_run:

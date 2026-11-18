@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 
 from PIL import Image
 from omnigamer.memory import GameMemory
+from omnigamer.perception import FrameFacts, VisualAssessment
 from omnigamer.planner import (BudgetControls, DeadlineControls, GoalExecutor, GoalPlan, GoalPlanner,
                                InputActionBudget, InputActionLimitExceeded,
                                PlanningError, SkillOutcomeStore)
@@ -38,6 +39,28 @@ class GoalPlannerTests(unittest.TestCase):
         self.profile = GameProfile(game_id="sim", camera_type="first_person",
                                    motion_limits={"max_run_seconds": 20, "max_actions": 3})
         self.registry = default_registry()
+
+    def _mining_plan(self):
+        return {"steps": [{"skill": "interact_until_change", "args": {
+            "region": "hotbar", "action": "primary_hold", "max_repeats": 1},
+            "expected_result": "the visible log disappears",
+            "success_check": "the target log is no longer visible"}]}
+
+    def _mining_profile(self):
+        return GameProfile(game_id="sim", camera_type="first_person",
+            actions={"primary_hold": {"kind": "mouse", "value": "left", "duration": 0.1}},
+            mine_actions=["primary_hold"],
+            regions={"hotbar": {"x1": 0.3, "y1": 0.9, "x2": 0.7, "y2": 1}},
+            mine_requires_grounded_level_view=True,
+            mine_requires_target_at_crosshair=True,
+            motion_limits={"max_run_seconds": 20, "max_actions": 3})
+
+    @staticmethod
+    def _mining_assessment(*, target=True):
+        facts = FrameFacts(scene="gameplay", pitch="level", safe_footing=True,
+                           target_at_crosshair=target)
+        return VisualAssessment(before=facts, after=facts, result="unknown", confidence=0.95,
+                                evidence="Current frame shows the mining safety facts.")
 
     def test_rejects_unknown_skill_and_invalid_arguments(self):
         planner = GoalPlanner(self.registry, lambda **_: plan_for("ghost"))
@@ -292,6 +315,175 @@ class GoalPlannerTests(unittest.TestCase):
             self.assertEqual(recorded_result.evidence["failure_stage"], "skill_deadline")
             self.assertEqual(recorded_result.evidence["input_actions"], 1)
             self.assertEqual(store.summary("sim")[0]["successes"], 0)
+
+    def test_skill_time_remaining_raises_typed_deadline(self):
+        from omnigamer.planner import skill_time_remaining
+        from omnigamer.skills.contracts import SkillDeadlineExceeded
+
+        self.assertEqual(skill_time_remaining(3.0, clock=lambda: 2.0), 1.0)
+        with self.assertRaises(SkillDeadlineExceeded):
+            skill_time_remaining(2.0, clock=lambda: 2.0)
+
+    def test_profiled_mining_fails_closed_without_preflight(self):
+        with tempfile.TemporaryDirectory() as temp:
+            profile = self._mining_profile()
+            frame = Image.new("RGB", (16, 16), (30, 40, 50))
+            sends = []
+            logs = []
+            runner = GoalExecutor(
+                GoalPlanner(self.registry, lambda **_: self._mining_plan()), self.registry,
+                SkillOutcomeStore(Path(temp) / "outcomes.db"), profile=profile, game_id="sim",
+                execute_skill=lambda *args: sends.append(args), frame_provider=lambda: frame,
+                stop_check=lambda: None, logger=logs.append, max_replans=0)
+
+            runner.run("collect a visible log")
+
+            self.assertEqual(sends, [])
+            preflight = next(row for row in logs if row["event"] == "skill_preflight")
+            self.assertEqual(preflight["result"]["result_code"], "MINING_PREFLIGHT_UNAVAILABLE")
+            self.assertEqual(preflight["result"]["evidence"]["postcondition"],
+                             "not_checked_no_input")
+
+    def test_profiled_mining_preflight_timeout_never_sends_input(self):
+        with tempfile.TemporaryDirectory() as temp:
+            profile = self._mining_profile()
+            frame = Image.new("RGB", (16, 16), (30, 40, 50))
+            sends = []
+            logs = []
+
+            def timeout(*_args):
+                raise TimeoutError("preflight inference timed out")
+
+            runner = GoalExecutor(
+                GoalPlanner(self.registry, lambda **_: self._mining_plan()), self.registry,
+                SkillOutcomeStore(Path(temp) / "outcomes.db"), profile=profile, game_id="sim",
+                execute_skill=lambda *args: sends.append(args), frame_provider=lambda: frame,
+                stop_check=lambda: None, logger=logs.append, max_replans=0,
+                skill_preflight=timeout)
+
+            runner.run("collect a visible log")
+
+            self.assertEqual(sends, [])
+            preflight = next(row for row in logs if row["event"] == "skill_preflight")
+            self.assertEqual(preflight["result"]["result_code"], "MINING_PREFLIGHT_TIMEOUT")
+
+    def test_profiled_right_click_is_not_treated_as_mining(self):
+        with tempfile.TemporaryDirectory() as temp:
+            profile = self._mining_profile()
+            profile.actions = {"interact": {"kind": "mouse", "value": "right", "duration": 0.1}}
+            frame = Image.new("RGB", (16, 16), (30, 40, 50))
+            sends = []
+            plan = {"steps": [{"skill": "interact_until_change", "args": {
+                "region": "hotbar", "action": "interact", "max_repeats": 1},
+                "expected_result": "the door opens", "success_check": "the room is visible"}]}
+
+            def execute(*_args):
+                sends.append("right-click action executed")
+                return SkillResult(status=SkillStatus.UNCONFIRMED,
+                    result_code="INTERACTION_OUTCOME_UNCONFIRMED", reason="needs post-check")
+
+            runner = GoalExecutor(
+                GoalPlanner(self.registry, lambda **_: plan), self.registry,
+                SkillOutcomeStore(Path(temp) / "outcomes.db"), profile=profile, game_id="sim",
+                execute_skill=execute, frame_provider=lambda: frame, stop_check=lambda: None,
+                max_replans=0)
+
+            runner.run("open the door")
+
+            self.assertEqual(sends, ["right-click action executed"])
+
+    def test_profiled_mining_rejects_target_away_from_crosshair_without_input(self):
+        with tempfile.TemporaryDirectory() as temp:
+            profile = self._mining_profile()
+            frame = Image.new("RGB", (16, 16), (30, 40, 50))
+            sends = []
+            logs = []
+            runner = GoalExecutor(
+                GoalPlanner(self.registry, lambda **_: self._mining_plan()), self.registry,
+                SkillOutcomeStore(Path(temp) / "outcomes.db"), profile=profile, game_id="sim",
+                execute_skill=lambda *args: sends.append(args), frame_provider=lambda: frame,
+                stop_check=lambda: None, logger=logs.append, max_replans=0,
+                skill_preflight=lambda *_: self._mining_assessment(target=False))
+
+            runner.run("collect a visible log")
+
+            self.assertEqual(sends, [])
+            preflight = next(row for row in logs if row["event"] == "skill_preflight")
+            self.assertEqual(preflight["result"]["result_code"], "MINING_PREFLIGHT_BLOCKED")
+            self.assertIn("target_at_crosshair_unconfirmed",
+                          preflight["result"]["evidence"]["blocked_conditions"])
+
+    def test_profiled_mining_keeps_ambiguous_target_fact_unconfirmed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            profile = self._mining_profile()
+            frame = Image.new("RGB", (16, 16), (30, 40, 50))
+            sends = []
+            logs = []
+            runner = GoalExecutor(
+                GoalPlanner(self.registry, lambda **_: self._mining_plan()), self.registry,
+                SkillOutcomeStore(Path(temp) / "outcomes.db"), profile=profile, game_id="sim",
+                execute_skill=lambda *args: sends.append(args), frame_provider=lambda: frame,
+                stop_check=lambda: None, logger=logs.append, max_replans=0,
+                skill_preflight=lambda *_: self._mining_assessment(target=None))
+
+            runner.run("collect a visible log")
+
+            self.assertEqual(sends, [])
+            preflight = next(row for row in logs if row["event"] == "skill_preflight")
+            self.assertEqual(preflight["result"]["result_code"],
+                             "MINING_PREFLIGHT_UNCONFIRMED")
+            self.assertIn("target_at_crosshair_unconfirmed",
+                          preflight["result"]["evidence"]["unknown_conditions"])
+
+    def test_profiled_mining_rejects_stale_facts_before_input(self):
+        with tempfile.TemporaryDirectory() as temp:
+            profile = self._mining_profile()
+            original = Image.new("RGB", (16, 16), (30, 40, 50))
+            changed = Image.new("RGB", (16, 16), (220, 210, 200))
+            frames = iter([original, original.copy(), changed])
+            sends = []
+            logs = []
+            runner = GoalExecutor(
+                GoalPlanner(self.registry, lambda **_: self._mining_plan()), self.registry,
+                SkillOutcomeStore(Path(temp) / "outcomes.db"), profile=profile, game_id="sim",
+                execute_skill=lambda *args: sends.append(args), frame_provider=lambda: next(frames),
+                stop_check=lambda: None, logger=logs.append, max_replans=0,
+                skill_preflight=lambda *_: self._mining_assessment(target=True))
+
+            runner.run("collect a visible log")
+
+            self.assertEqual(sends, [])
+            preflight = next(row for row in logs if row["event"] == "skill_preflight")
+            self.assertEqual(preflight["result"]["result_code"], "STALE_MINING_PREFLIGHT")
+            self.assertGreaterEqual(
+                preflight["result"]["evidence"]["screen_delta_after_preflight"], 0.02)
+
+    def test_profiled_mining_proceeds_only_on_confident_matching_preflight_facts(self):
+        with tempfile.TemporaryDirectory() as temp:
+            profile = self._mining_profile()
+            frame = Image.new("RGB", (16, 16), (30, 40, 50))
+            sends = []
+            logs = []
+
+            def execute(*_args):
+                sends.append("input path reached")
+                return SkillResult(status=SkillStatus.UNCONFIRMED,
+                    result_code="INTERACTION_OUTCOME_UNCONFIRMED",
+                    reason="interaction outcome requires post-check")
+
+            runner = GoalExecutor(
+                GoalPlanner(self.registry, lambda **_: self._mining_plan()), self.registry,
+                SkillOutcomeStore(Path(temp) / "outcomes.db"), profile=profile, game_id="sim",
+                execute_skill=execute, frame_provider=lambda: frame, stop_check=lambda: None,
+                logger=logs.append, max_replans=0,
+                skill_preflight=lambda *_: self._mining_assessment(target=True))
+
+            runner.run("collect a visible log")
+
+            self.assertEqual(sends, ["input path reached"])
+            preflight = next(row for row in logs if row["event"] == "skill_preflight")
+            self.assertEqual(preflight["result"]["result_code"], "MINING_PREFLIGHT_PASSED")
+            self.assertEqual(preflight["result"]["evidence"]["facts"]["target_at_crosshair"], True)
 
     def test_unrelated_timeout_error_keeps_generic_failure_code(self):
         recorder = Mock()

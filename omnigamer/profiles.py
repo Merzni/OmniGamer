@@ -72,6 +72,7 @@ class GameProfile(BaseModel):
     move_keys: Dict[str, str] = Field(default_factory=lambda: {
         "forward": "w", "backward": "s", "left": "a", "right": "d"})
     actions: Dict[str, InputAction] = Field(default_factory=dict)
+    mine_actions: list[str] = Field(default_factory=list)
     regions: Dict[str, NormalizedRegion] = Field(default_factory=dict)
     forbidden_keys: list[str] = Field(default_factory=list)
     motion_limits: MotionLimits = Field(default_factory=MotionLimits)
@@ -90,6 +91,11 @@ class GameProfile(BaseModel):
         # while leaving non-camera profiles free of that assumption.
         if self.mine_requires_grounded_level_view is None:
             self.mine_requires_grounded_level_view = self.camera_type == "first_person"
+        if len(set(self.mine_actions)) != len(self.mine_actions):
+            raise ValueError("mine_actions must not contain duplicates")
+        unknown_actions = set(self.mine_actions) - set(self.actions)
+        if unknown_actions:
+            raise ValueError(f"mine_actions must reference configured actions: {sorted(unknown_actions)}")
         return self
 
     @field_validator("game_id")

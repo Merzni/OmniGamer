@@ -126,7 +126,7 @@ def main():
                 from omnigamer.detector_client import DetectorClient
                 from omnigamer.planner import (BudgetControls, DeadlineControls, DeadlineDetector,
                                                GoalExecutor, GoalPlanner, InputActionBudget,
-                                               SkillOutcomeStore)
+                                               SkillOutcomeStore, skill_time_remaining)
                 from omnigamer.skills.registry import default_registry
                 from omnigamer.skills.telemetry import SkillStepRecorder
 
@@ -142,8 +142,7 @@ def main():
                     bounded_detector = DeadlineDetector(detector, deadline)
                     def bounded_stop_check():
                         agent._check_stop()
-                        if time.monotonic() >= deadline:
-                            raise TimeoutError("skill time budget exhausted")
+                        skill_time_remaining(deadline)
                     forbidden = set(profile.forbidden_keys)
                     mapped = []
                     if spec.name == "move_pulse":
@@ -229,6 +228,25 @@ def main():
                     return agent._call_interruptibly(agent.brain.assess, before, after, action, context,
                                                      timeout_seconds=timeout_seconds)
 
+                def preflight_mining_skill(goal, step, frame, timeout_seconds):
+                    action = {"action_type": "mine", "target_label": goal,
+                              "parameters": step.args, "preflight_only": True}
+                    context = (f"Pre-action safety check for mining goal: {goal}. "
+                               f"Planned visible result: {step.expected_result}. "
+                               f"Success check: {step.success_check}. "
+                               "Assess the current frame only; do not claim mining progress. "
+                               "Report target_at_crosshair=true only if this goal's visible target surface "
+                               "covers the exact center. Also report gameplay scene, level pitch, and safe footing. "
+                               "Unknown or ambiguous facts must remain null/unknown.")
+                    previous_request_type = getattr(agent.brain, "_telemetry_request_type", "decide")
+                    agent.brain._telemetry_request_type = "preflight"
+                    try:
+                        return agent._call_interruptibly(
+                            agent.brain.assess, frame, frame, action, context,
+                            timeout_seconds=timeout_seconds)
+                    finally:
+                        agent.brain._telemetry_request_type = previous_request_type
+
                 executor = GoalExecutor(
                     planner, registry, outcome_store, profile=profile, game_id=agent.game_id,
                     execute_skill=execute_skill, frame_provider=agent.capture.grab_frame,
@@ -237,6 +255,7 @@ def main():
                     result_verifier=verify_skill_result,
                     logger=record_goal_event, detector=detector,
                     menu_preview=preview_menu_target if args.dry_run and not args.frame_dir else None,
+                    skill_preflight=preflight_mining_skill,
                 )
                 try:
                     result = executor.run(args.goal)
