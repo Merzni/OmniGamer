@@ -479,13 +479,18 @@ class GameMemory:
                 "button state; try a different target or an appropriate keyboard action, not the same click.")
 
     def get_navigation_hint(self, game_id: str, visual_signature: str,
-                            max_delta: float = 0.015, action: Optional[Dict] = None) -> str:
+                            max_delta: float = 0.015, action: Optional[Dict] = None,
+                            move_keys: Optional[Dict[str, str]] = None,
+                            jump_available: bool = True) -> str:
         recent = [row for row in self.get_recent_experiences(game_id, 8)
                   if row["learnable"] and row["action_type"] != "wait"]
         if len(recent) < 2:
             return ""
         previous, latest = recent[-2:]
-        direction = latest.get("key") or "w"
+        movement = {"forward": "w", "backward": "s", "left": "a", "right": "d"}
+        movement.update(move_keys or {})
+        allowed = {str(value).casefold() for value in movement.values()}
+        direction = (latest.get("key") or movement["forward"]).casefold()
         if (any(row["action_type"] != "walk" or (row.get("key") or "w") != direction
                 or row["screen_delta"] > max_delta or row["effective"]
                 or not row["visual_signature"]
@@ -496,9 +501,12 @@ class GameMemory:
             action.get("action_type") == "walk" and (action.get("key") or "w") == direction
         ):
             return ""
+        jump_key = direction if direction in allowed else movement["forward"]
+        alternative = (f"Use jump with key='{jump_key}' for a low step, "
+                       if jump_available else "Choose another profile-permitted direction, ")
         return (f"\nNAVIGATION REPLAN: walking '{direction}' twice barely changed the view. "
                 "Possible obstacle, not proof of progress. Inspect the ground/obstacle at the crosshair. "
-                "Use jump with key='w' for a low step, look with a direction/amount to inspect a route, "
+                f"{alternative}look with a direction/amount to inspect a route, "
                 "or choose another direction; do not walk into the same obstacle again.")
 
     def get_dead_click_hints(self, state_hash: str) -> str:

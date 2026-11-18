@@ -164,6 +164,14 @@ class OmniAgent:
             return decision.model_copy(update={"key": key, "duration": min(duration, jump.duration)})
         return decision.model_copy(update={"key": key, "duration": duration})
 
+    def _navigation_memory_hint(self, visual_signature, action=None):
+        jump = self.profile.actions.get("jump") if self.profile else None
+        return self.memory.get_navigation_hint(
+            self.game_id, visual_signature, config.navigation_stuck_delta, action,
+            move_keys=self.profile.move_keys if self.profile else None,
+            jump_available=(not self.profile or bool(jump and jump.kind == "key")),
+        )
+
     def request_stop(self, reason="f12"):
         """Latch the stop flag and immediately release bot-held inputs."""
         if self._stop_reason is None:
@@ -500,9 +508,7 @@ class OmniAgent:
             state_hash, self.game_id, visual_signature, config.memory_hash_distance
         )
         context_hint += self.memory.get_recent_failure_hint(self.game_id, visual_signature)
-        context_hint += self.memory.get_navigation_hint(
-            self.game_id, visual_signature, config.navigation_stuck_delta
-        )
+        context_hint += self._navigation_memory_hint(visual_signature)
         context_hint += self.supervisor.context()
         if self.last_guard_reason:
             context_hint += "\nPREVIOUS CONTROL GUARD: " + self.last_guard_reason
@@ -537,9 +543,8 @@ class OmniAgent:
         self._trace_start("memory_lookup")
         self.last_memory_warning = self.memory.get_repetition_warning(
             state_hash, self.game_id, decision.model_dump(), visual_signature
-        ) or self.memory.get_recent_failure_hint(self.game_id, visual_signature, decision.model_dump()) or self.memory.get_navigation_hint(
-            self.game_id, visual_signature, config.navigation_stuck_delta, decision.model_dump()
-        )
+        ) or self.memory.get_recent_failure_hint(self.game_id, visual_signature, decision.model_dump()) or self._navigation_memory_hint(
+            visual_signature, decision.model_dump())
         self._trace_stop("memory_lookup")
         self.last_action_source = "vlm"
         learnable = not bool(self.brain.last_error)
@@ -551,9 +556,7 @@ class OmniAgent:
             vision_seconds += time.perf_counter() - vision_started
             learnable = not bool(self.brain.last_error)
             self._trace_start("memory_lookup")
-            if learnable and self.memory.get_navigation_hint(
-                self.game_id, visual_signature, config.navigation_stuck_delta, decision.model_dump()
-            ):
+            if learnable and self._navigation_memory_hint(visual_signature, decision.model_dump()):
                 decision = BrainDecision(
                     action_type="look", look_direction="right", look_amount="large",
                     duration=0.1, confidence=0.3,

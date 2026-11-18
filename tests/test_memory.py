@@ -179,6 +179,24 @@ class MemoryTests(unittest.TestCase):
         self.record(action_type="walk", key="w", effective=True, screen_delta=0.1, visual_signature=signature)
         self.assertFalse(self.memory.get_navigation_hint("game:test", signature))
 
+    def test_navigation_hint_uses_profile_movement_key_and_only_suggests_configured_jump(self):
+        signature = self.memory.compute_visual_signature(Image.new("RGB", (100, 100), (20, 30, 20)))
+        self.record(action_type="walk", key="up", state_hash="0000000000000000",
+                    screen_delta=0.001, visual_signature=signature)
+        self.record(action_type="walk", key="up", state_hash="ffffffffffffffff",
+                    screen_delta=0.012, visual_signature=signature)
+        move_keys = {"forward": "up", "backward": "down", "left": "left", "right": "right"}
+
+        jump_hint = self.memory.get_navigation_hint(
+            "game:test", signature, move_keys=move_keys, jump_available=True)
+        self.assertIn("jump with key='up'", jump_hint)
+        self.assertNotIn("key='w'", jump_hint)
+
+        no_jump_hint = self.memory.get_navigation_hint(
+            "game:test", signature, move_keys=move_keys, jump_available=False)
+        self.assertIn("profile-permitted direction", no_jump_hint)
+        self.assertNotIn("jump", no_jump_hint)
+
     def test_jump_directions_are_distinct_in_memory(self):
         self.assertNotEqual(self.memory._action_key(dict(action_type="jump",key="w",duration=0.6)),
                             self.memory._action_key(dict(action_type="jump",key="a",duration=0.6)))
