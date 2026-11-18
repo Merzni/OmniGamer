@@ -1298,6 +1298,48 @@ class GoalPlannerTests(unittest.TestCase):
             self.assertFalse(any(row["event"] == "would_send" for row in logs))
             self.assertTrue(any(row["event"] == "menu_preview_aborted" for row in logs))
 
+    def test_verified_goal_outcome_persists_and_is_retrieved_for_next_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "outcomes.db"
+            frame = Image.new("RGB", (16, 16), (24, 48, 72))
+            state_hash = GameMemory.compute_state_hash(frame)
+            first_store = SkillOutcomeStore(path)
+            first_runner = GoalExecutor(
+                GoalPlanner(self.registry, lambda **_: plan_for()), self.registry, first_store,
+                profile=self.profile, game_id="sim",
+                execute_skill=lambda *_: SkillResult(status=SkillStatus.SUCCESS,
+                    result_code="SUCCESS", reason="movement_sent"),
+                frame_provider=lambda: frame.copy(), stop_check=lambda: None,
+                result_verifier=confirm_goal, max_replans=0)
+
+            first_result = first_runner.run("move")
+
+            self.assertEqual(first_result["status"], "SUCCESS")
+            reopened_store = SkillOutcomeStore(path)
+            summary = reopened_store.summary("sim", target="move", state_hash=state_hash)
+            self.assertEqual(summary[0]["successes"], 1)
+            self.assertEqual(summary[0]["verified_example"]["args"],
+                             {"direction": "forward", "seconds": 0.5})
+
+            captured_outcomes = []
+            def request_plan(**kwargs):
+                captured_outcomes.append(kwargs["outcome_summary"])
+                return plan_for()
+
+            next_runner = GoalExecutor(
+                GoalPlanner(self.registry, request_plan), self.registry, reopened_store,
+                profile=self.profile, game_id="sim",
+                execute_skill=lambda *_: self.fail("dry run executed an input skill"),
+                frame_provider=lambda: frame.copy(), stop_check=lambda: None, dry_run=True,
+                max_replans=0)
+
+            next_result = next_runner.run("move")
+
+            self.assertEqual(next_result["status"], "DRY_RUN")
+            self.assertEqual(next_result["memory_reuse_count"], 1)
+            self.assertEqual(captured_outcomes[0][0]["verified_example"]["success_check"],
+                             "result status")
+
     def test_goal_telemetry_counts_only_exact_verified_example_reuse_for_same_goal(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = SkillOutcomeStore(Path(tmp) / "outcomes.db")
