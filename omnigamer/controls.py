@@ -127,8 +127,8 @@ class HumanInputController:
             with self._pressed_lock:
                 for index, (active_token, _) in enumerate(self._active_releases):
                     if active_token is token:
-                        self._active_releases.pop(index)
                         self._send(up)
+                        self._active_releases.pop(index)
                         break
 
     def release_all(self):

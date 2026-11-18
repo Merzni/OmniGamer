@@ -79,6 +79,26 @@ class InputTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "SendInput rejected"):
                 controller._send(controls.INPUT())
 
+    def test_failed_release_stays_registered_for_emergency_retry(self):
+        controller = controls.HumanInputController(failsafe_corner=False)
+
+        def send(packet):
+            if packet.union.mi.dwFlags == controls.MOUSEEVENTF_LEFTUP and send.release_attempts == 0:
+                send.release_attempts += 1
+                raise RuntimeError("temporary release failure")
+            if packet.union.mi.dwFlags == controls.MOUSEEVENTF_LEFTUP:
+                send.release_attempts += 1
+
+        send.release_attempts = 0
+        with patch.object(controller, "_send", side_effect=send):
+            with self.assertRaisesRegex(RuntimeError, "temporary release failure"):
+                controller.hold_mouse(duration=0)
+
+            self.assertEqual(len(controller._active_releases), 1)
+            self.assertEqual(controller.release_all(), [])
+            self.assertEqual(send.release_attempts, 2)
+            self.assertEqual(controller._active_releases, [])
+
     def test_mouse_button_released_when_focus_is_lost_mid_hold(self):
         target_check = Mock(side_effect=[None, None, RuntimeError("focus lost")])
         controller = controls.HumanInputController(failsafe_corner=False, target_check=target_check)
