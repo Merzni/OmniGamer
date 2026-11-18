@@ -316,17 +316,20 @@ class PlaySupervisor:
             event["recovery_started"] = True
         return event
 
-    def recovery_action(self, proposal, facts):
+    def recovery_action(self, proposal, facts, move_keys=None):
         if self.mode != "recovering" or facts.scene != "gameplay":
             return proposal, ""
         phase = 4 - self.recovery_remaining
         result = dict(proposal)
         direction = -1 if self.recovery_count % 2 else 1
+        move_keys = move_keys or {
+            "forward": "w", "backward": "s", "left": "a", "right": "d"}
         if phase == 0:
             result.update(action_type="look", look_direction="left" if direction < 0 else "right",
                           look_amount="medium", x=None, y=None, key=None)
         elif phase in {1, 2} and facts.pitch == "level" and facts.safe_footing is True:
-            result.update(action_type="walk", key="s" if phase == 1 else ("a" if direction < 0 else "d"),
+            movement = "backward" if phase == 1 else ("left" if direction < 0 else "right")
+            result.update(action_type="walk", key=move_keys[movement],
                           duration=.5, x=None, y=None)
         elif phase == 1:
             result.update(action_type="look", look_direction="right" if direction < 0 else "left",

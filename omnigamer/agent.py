@@ -618,7 +618,9 @@ class OmniAgent:
                                pitch=decision.camera_pitch if decision.visual_confidence >= .85 else "unknown")
             facts_source = "decision_fallback"
         grounded_confident = (facts_confident and facts.scene == "gameplay" and facts.safe_footing is True)
-        recovered, recovery_reason = self.supervisor.recovery_action(decision.model_dump(), facts)
+        recovered, recovery_reason = self.supervisor.recovery_action(
+            decision.model_dump(), facts,
+            move_keys=self.profile.move_keys if self.profile else None)
         if recovery_reason:
             decision = BrainDecision(**recovered).model_copy(update={
                 "intent": "Test an alternative route after repeated ineffective actions",

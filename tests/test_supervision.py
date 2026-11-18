@@ -352,6 +352,22 @@ class ContinuousPlayTests(unittest.TestCase):
         unsafe,_=play.recovery_action(proposal,FrameFacts(scene="gameplay",pitch="unknown"))
         self.assertEqual(unsafe["action_type"],"look")
 
+    def test_recovery_uses_profile_movement_mapping_for_back_and_side_steps(self):
+        play=PlaySupervisor(max_steps=4)
+        for step in range(4):play.observe(None,1,step,step+1)
+        proposal=dict(action_type="walk",key="up",duration=.6)
+        move_keys={"forward":"up", "backward":"down", "left":"left", "right":"right"}
+        facts=FrameFacts(scene="gameplay",pitch="level",safe_footing=True)
+
+        action,_=play.recovery_action(proposal,facts,move_keys=move_keys)
+        self.assertEqual(action["action_type"],"look")
+        play.observe(None,1,5,6)
+        action,_=play.recovery_action(proposal,facts,move_keys=move_keys)
+        self.assertEqual((action["action_type"],action["key"]),("walk","down"))
+        play.observe(None,1,6,7)
+        action,_=play.recovery_action(proposal,facts,move_keys=move_keys)
+        self.assertEqual((action["action_type"],action["key"]),("walk","left"))
+
     def test_recovery_state_persists_without_resurrecting_a_stop_flag(self):
         play=PlaySupervisor(max_steps=4)
         for step in range(4):play.observe(None,1,step,step+1)
