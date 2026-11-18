@@ -34,3 +34,23 @@ class MenuCriticTests(unittest.TestCase):
     def test_missing_selection_cues_cannot_claim_known_selected_state(self):
         result=self.assess({"scene":"menu","menu_id":"world_select","menu_state":"world_selected"})
         self.assertEqual(result.after.menu_state,"unknown_selection")
+
+    def test_goal_menu_click_verification_uses_menu_critic_without_scene_type(self):
+        payload={"before":{"scene":"menu","menu_id":"main_menu","menu_state":"default"},
+                 "after":{"scene":"menu","menu_id":"world_select","menu_state":"no_selection",
+                          "selection_visible":False,"play_enabled":False},
+                 "confidence":.95,"menu_action_succeeded":False,"result":"blocked",
+                 "evidence":"The world selection screen is visible.","uncertainty":""}
+        response=Mock()
+        response.json.return_value={"choices":[{"message":{"content":json.dumps(payload)}}]}
+        frame=Image.new("RGB",(800,500))
+        brain=VisionBrain();brain.active_profile=load_profile("minecraft")
+        with patch("omnigamer.vision_brain.requests.post",return_value=response) as post:
+            result=brain.assess(frame,frame,{"action_type":"click_menu_target",
+                "expected_result":"World selection screen appears",
+                "success_check":"World selection screen is visible"},"Goal step")
+        self.assertFalse(result.menu_action_succeeded)
+        request=post.call_args.kwargs["json"]
+        self.assertIn("You verify MENU transitions",request["messages"][0]["content"])
+        required=request["response_format"]["json_schema"]["schema"]["required"]
+        self.assertIn("menu_action_succeeded",required)

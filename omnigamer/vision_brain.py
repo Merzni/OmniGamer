@@ -504,7 +504,8 @@ class VisionBrain:
             "false for unchanged or wrong transitions, null if unclear. A static confirmation frame need not show a new action. "
             "Keep evidence and uncertainty short; do not repeat the example as a diagnosis."
         )
-        is_menu=action.get("scene_type")=="menu"
+        is_menu=(action.get("scene_type")=="menu" or
+                 action.get("action_type")=="click_menu_target")
         if is_menu and action.get("verification_only"):
             try:return self._inspect_menu(after, profile=active_profile)
             except Exception as exc:
