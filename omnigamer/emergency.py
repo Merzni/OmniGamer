@@ -60,20 +60,32 @@ class EmergencyHotkey:
             try:
                 self.poll_once()
             except EmergencyHotkeyPollingError as exc:
-                logging.getLogger(__name__).exception(
-                    "Emergency hotkey polling failed; requesting a fail-safe stop")
-                if self.on_error:
-                    self.on_error(exc)
-                else:
-                    self.callback()
+                self._handle_polling_error(exc)
                 return
             self._stop.wait(self.poll_interval)
+
+    def _handle_polling_error(self, error):
+        logging.getLogger(__name__).error(
+            "Emergency hotkey polling failed; requesting a fail-safe stop",
+            exc_info=(type(error), error, error.__traceback__))
+        if self.on_error:
+            self.on_error(error)
+        else:
+            self.callback()
 
     def start(self):
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
         self.last_error = ""
+        try:
+            already_pressed = self.poll_once()
+        except EmergencyHotkeyPollingError as exc:
+            self._handle_polling_error(exc)
+            return
+        if already_pressed:
+            self._stop.set()
+            return
         self._thread = threading.Thread(target=self._run, name="OmniGamerEmergencyKey", daemon=True)
         self._thread.start()
 

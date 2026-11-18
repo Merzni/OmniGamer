@@ -45,7 +45,8 @@ class EmergencyHotkeyTests(unittest.TestCase):
     def test_key_state_failure_requests_stop_and_records_failure(self):
         stopped = threading.Event()
         on_error = Mock(side_effect=lambda error: stopped.set())
-        hotkey = EmergencyHotkey("F12", Mock(), key_state=Mock(side_effect=OSError("access denied")),
+        key_state = Mock(side_effect=[False, OSError("access denied")])
+        hotkey = EmergencyHotkey("F12", Mock(), key_state=key_state,
                                  poll_interval=0.001, on_error=on_error)
 
         with self.assertLogs("omnigamer.emergency", level="ERROR"):
@@ -57,6 +58,28 @@ class EmergencyHotkeyTests(unittest.TestCase):
         self.assertIn("access denied", hotkey.last_error)
         self.assertEqual(on_error.call_count, 1)
         hotkey.callback.assert_not_called()
+
+    def test_start_does_not_launch_monitor_when_initial_key_state_fails(self):
+        on_error = Mock()
+        hotkey = EmergencyHotkey("F12", Mock(), key_state=Mock(side_effect=OSError("access denied")),
+                                 on_error=on_error)
+
+        with self.assertLogs("omnigamer.emergency", level="ERROR"):
+            hotkey.start()
+
+        self.assertIsNone(hotkey._thread)
+        self.assertEqual(on_error.call_count, 1)
+        self.assertIn("access denied", hotkey.last_error)
+
+    def test_pressed_emergency_key_at_start_stops_before_spawning_thread(self):
+        callback = Mock()
+        hotkey = EmergencyHotkey("F12", callback, key_state=lambda: True)
+
+        hotkey.start()
+
+        callback.assert_called_once_with()
+        self.assertIsNone(hotkey._thread)
+        self.assertTrue(hotkey._stop.is_set())
 
     def test_monitor_failure_stops_agent_with_distinct_reason(self):
         agent = OmniAgent.__new__(OmniAgent)
