@@ -14,7 +14,8 @@ from .basic import (
     turn,
     wait_for_condition,
 )
-from .contracts import SkillRegistry, SkillResult, SkillSpec, SkillStatus
+from .contracts import (InputActionLimitExceeded, SkillDeadlineExceeded, SkillRegistry,
+                        SkillResult, SkillSpec, SkillStatus)
 from .menu import ClickMenuTargetParams, click_menu_target
 from .telemetry import SkillStepRecorder
 
@@ -47,12 +48,30 @@ def _recorder_for(name, args, dependencies):
     raise ValueError("Skill execution requires a recorder or run telemetry")
 
 
-def _run_recorded(recorder, operation):
+def _run_recorded(recorder, operation, *, controls=None):
     try:
         result = operation()
     except InterruptedError as exc:
         result = SkillResult(status=SkillStatus.ABORT, result_code="ABORT",
                              reason=str(exc), evidence={"exception": type(exc).__name__})
+    except InputActionLimitExceeded as exc:
+        evidence = {"exception": type(exc).__name__, "failure_stage": "input_action_budget",
+                    "postcondition": "not_checked_budget_exhausted"}
+        budget = getattr(controls, "budget", None)
+        actions_used = getattr(budget, "actions_used", exc.actions_used)
+        if actions_used is not None:
+            evidence["input_actions"] = actions_used
+        result = SkillResult(status=SkillStatus.FAILED, result_code="INPUT_ACTION_LIMIT",
+                             reason=f"max_actions: {exc}", evidence=evidence)
+    except SkillDeadlineExceeded as exc:
+        evidence = {"exception": type(exc).__name__, "failure_stage": "skill_deadline",
+                    "postcondition": "not_checked_skill_timeout"}
+        budget = getattr(controls, "budget", None)
+        actions_used = getattr(budget, "actions_used", None)
+        if actions_used is not None:
+            evidence["input_actions"] = actions_used
+        result = SkillResult(status=SkillStatus.FAILED, result_code="SKILL_TIMEOUT",
+                             reason=f"skill_time_budget_exhausted: {exc}", evidence=evidence)
     except Exception as exc:
         result = SkillResult(status=SkillStatus.FAILED, result_code="FAILED",
                              reason=f"{type(exc).__name__}: {exc}",
@@ -109,49 +128,55 @@ def execute_approach_target(args, *, capture, detector, controls, camera_guard,
             profile=profile,
         ).run()
         return _approach_result(raw)
-    return _run_recorded(recorder, run)
+    return _run_recorded(recorder, run, controls=controls)
 
 
 def execute_search_target(args, **dependencies):
     params = _validate(SearchTargetParams, args)
     dependencies["recorder"] = _recorder_for("search_target", params.model_dump(), dependencies)
     return _run_recorded(dependencies.get("recorder"),
-                         lambda: search_target(**params.model_dump(), **dependencies))
+                         lambda: search_target(**params.model_dump(), **dependencies),
+                         controls=dependencies.get("controls"))
 
 
 def execute_move_pulse(args, **dependencies):
     params = _validate(MovePulseParams, args)
     dependencies["recorder"] = _recorder_for("move_pulse", params.model_dump(), dependencies)
     return _run_recorded(dependencies.get("recorder"),
-                         lambda: move_pulse(**params.model_dump(), **dependencies))
+                         lambda: move_pulse(**params.model_dump(), **dependencies),
+                         controls=dependencies.get("controls"))
 
 
 def execute_turn(args, **dependencies):
     params = _validate(TurnParams, args)
     dependencies["recorder"] = _recorder_for("turn", params.model_dump(), dependencies)
     return _run_recorded(dependencies.get("recorder"),
-                         lambda: turn(**params.model_dump(), **dependencies))
+                         lambda: turn(**params.model_dump(), **dependencies),
+                         controls=dependencies.get("controls"))
 
 
 def execute_interact_until_change(args, **dependencies):
     params = _validate(InteractUntilChangeParams, args)
     dependencies["recorder"] = _recorder_for("interact_until_change", params.model_dump(), dependencies)
     return _run_recorded(dependencies.get("recorder"),
-                         lambda: interact_until_change(**params.model_dump(), **dependencies))
+                         lambda: interact_until_change(**params.model_dump(), **dependencies),
+                         controls=dependencies.get("controls"))
 
 
 def execute_wait_for_condition(args, **dependencies):
     params = _validate(WaitForConditionParams, args)
     dependencies["recorder"] = _recorder_for("wait_for_condition", params.model_dump(), dependencies)
     return _run_recorded(dependencies.get("recorder"),
-                         lambda: wait_for_condition(**params.model_dump(), **dependencies))
+                         lambda: wait_for_condition(**params.model_dump(), **dependencies),
+                         controls=dependencies.get("controls"))
 
 
 def execute_click_menu_target(args, **dependencies):
     params = _validate(ClickMenuTargetParams, args)
     dependencies["recorder"] = _recorder_for("click_menu_target", params.model_dump(), dependencies)
     return _run_recorded(dependencies.get("recorder"),
-                         lambda: click_menu_target(**params.model_dump(), **dependencies))
+                         lambda: click_menu_target(**params.model_dump(), **dependencies),
+                         controls=dependencies.get("controls"))
 
 
 def default_registry(profile=None):

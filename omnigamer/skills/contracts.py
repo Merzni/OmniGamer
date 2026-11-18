@@ -15,6 +15,18 @@ class SkillStatus(str, Enum):
     UNCONFIRMED = "UNCONFIRMED"
 
 
+class InputActionLimitExceeded(RuntimeError):
+    """A goal skill tried to send input after reaching its per-run action budget."""
+
+    def __init__(self, message="input action limit reached", *, actions_used=None):
+        super().__init__(message)
+        self.actions_used = actions_used
+
+
+class SkillDeadlineExceeded(TimeoutError):
+    """A registered skill exceeded its allotted execution deadline."""
+
+
 class SkillResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
     status: SkillStatus

@@ -43,6 +43,9 @@ class GoalPlannerTests(unittest.TestCase):
         planner = GoalPlanner(self.registry, lambda **_: plan_for("ghost"))
         with self.assertRaises(PlanningError):
             planner.plan(frame=None, goal="x", profile=self.profile)
+        planner = GoalPlanner(self.registry, lambda **_: plan_for(args={"direction": "up", "seconds": 99}))
+        with self.assertRaises(PlanningError):
+            planner.plan(frame=None, goal="x", profile=self.profile)
 
     def test_plan_schema_accepts_six_steps_and_rejects_seven(self):
         step = plan_for()["steps"][0]
@@ -214,38 +217,60 @@ class GoalPlannerTests(unittest.TestCase):
             raw_controls = Mock()
             calls = []
             logs = []
-            planner = GoalPlanner(self.registry, lambda **_: calls.append("plan") or plan_for())
+            profile = GameProfile(game_id="sim", camera_type="first_person",
+                actions={"interact": {"kind": "key", "value": "e"}},
+                regions={"hotbar": {"x1": 0.3, "y1": 0.9, "x2": 0.7, "y2": 1}},
+                motion_limits={"max_run_seconds": 20, "max_actions": 2,
+                               "interaction_retry_step_seconds": 0})
+            plan = {"steps": [{"skill": "interact_until_change", "args": {
+                "region": "hotbar", "action": "interact", "max_repeats": 3},
+                "expected_result": "item acquired", "success_check": "item count increased"}]}
+            planner = GoalPlanner(self.registry, lambda **_: calls.append("plan") or plan)
+            capture = Mock()
+            capture.grab_frame.return_value = Image.new("RGB", (20, 20))
+            camera_guard = Mock()
+            camera_guard.filter.side_effect = lambda action: (action, None)
+            recorder = Mock()
 
-            def execute_skill(*_args):
-                controls = BudgetControls(raw_controls, budget)
-                controls.press_key("w", 0.1)
-                controls.move_camera(10, 0)
-                controls.hold_mouse("left", 0.1)
+            def execute_skill(spec, args, _remaining):
+                return spec.executor(args, capture=capture,
+                    controls=BudgetControls(raw_controls, budget), profile=profile,
+                    camera_guard=camera_guard, stop_check=lambda: None, recorder=recorder)
 
-            runner = GoalExecutor(planner, self.registry, SkillOutcomeStore(Path(temp) / "outcomes.db"),
-                profile=self.profile, game_id="sim", execute_skill=execute_skill,
+            store = SkillOutcomeStore(Path(temp) / "outcomes.db")
+            runner = GoalExecutor(planner, self.registry, store,
+                profile=profile, game_id="sim", execute_skill=execute_skill,
                 frame_provider=lambda: object(), stop_check=lambda: None,
                 input_action_budget=budget, logger=logs.append)
             result = runner.run("move")
             self.assertEqual(result["reason"], "max_actions")
             self.assertEqual(result["input_actions_used"], 2)
             self.assertEqual(len(calls), 1)
-            self.assertEqual(raw_controls.hold_mouse.call_count, 0)
+            self.assertEqual(raw_controls.press_key.call_count, 2)
             skill_result = next(row["result"] for row in logs if row["event"] == "skill_result")
             self.assertEqual(skill_result["result_code"], "INPUT_ACTION_LIMIT")
             self.assertEqual(skill_result["evidence"]["input_actions"], 2)
+            recorded_result = recorder.finish.call_args.args[0]
+            self.assertEqual(recorded_result.result_code, "INPUT_ACTION_LIMIT")
+            self.assertEqual(recorded_result.evidence["failure_stage"], "input_action_budget")
+            self.assertEqual(recorded_result.evidence["input_actions"], 2)
+            self.assertEqual(store.summary("sim")[0]["successes"], 0)
 
-    def test_skill_deadline_timeout_is_recorded_after_no_input_is_sent(self):
+    def test_skill_deadline_timeout_is_recorded_by_registered_executor(self):
         with tempfile.TemporaryDirectory() as temp:
             budget = InputActionBudget(3)
             raw_controls = Mock()
             logs = []
             planner = GoalPlanner(self.registry, lambda **_: plan_for())
+            camera_guard = Mock()
+            camera_guard.filter.side_effect = lambda action: (action, None)
+            recorder = Mock()
 
-            def execute_skill(*_args):
+            def execute_skill(spec, args, _remaining):
                 controls = BudgetControls(DeadlineControls(
                     raw_controls, deadline=1.0, clock=lambda: 2.0), budget)
-                controls.press_key("w", 0.1)
+                return spec.executor(args, controls=controls, profile=self.profile,
+                    camera_guard=camera_guard, stop_check=lambda: None, recorder=recorder)
 
             store = SkillOutcomeStore(Path(temp) / "outcomes.db")
             runner = GoalExecutor(planner, self.registry, store, profile=self.profile, game_id="sim",
@@ -262,10 +287,20 @@ class GoalPlannerTests(unittest.TestCase):
             skill_result = next(row["result"] for row in logs if row["event"] == "skill_result")
             self.assertEqual(skill_result["result_code"], "SKILL_TIMEOUT")
             self.assertEqual(skill_result["evidence"]["input_actions"], 1)
+            recorded_result = recorder.finish.call_args.args[0]
+            self.assertEqual(recorded_result.result_code, "SKILL_TIMEOUT")
+            self.assertEqual(recorded_result.evidence["failure_stage"], "skill_deadline")
+            self.assertEqual(recorded_result.evidence["input_actions"], 1)
             self.assertEqual(store.summary("sim")[0]["successes"], 0)
-        planner = GoalPlanner(self.registry, lambda **_: plan_for(args={"direction": "up", "seconds": 99}))
-        with self.assertRaises(PlanningError):
-            planner.plan(frame=None, goal="x", profile=self.profile)
+
+    def test_unrelated_timeout_error_keeps_generic_failure_code(self):
+        recorder = Mock()
+        from omnigamer.skills.registry import _run_recorded
+
+        result = _run_recorded(recorder, lambda: (_ for _ in ()).throw(TimeoutError("transport timeout")))
+        self.assertEqual(result.result_code, "FAILED")
+        self.assertEqual(result.evidence["exception"], "TimeoutError")
+        self.assertEqual(recorder.finish.call_args.args[0], result)
 
     def test_invalid_plan_gets_one_retry_with_error(self):
         calls = []

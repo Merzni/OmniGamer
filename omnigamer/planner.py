@@ -13,7 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .config import config
 from .memory import GameMemory
-from .skills.contracts import SkillStatus
+from .skills.contracts import (InputActionLimitExceeded, SkillDeadlineExceeded,
+                               SkillStatus)
 from .skills.menu import classify_menu_result, normalize_menu_label
 from .ui_grounding import (button_candidates, has_profile_menu_layout,
                            stacked_main_menu_layout)
@@ -67,7 +68,7 @@ class DeadlineControls:
     def _duration(self, requested):
         remaining = self.deadline - self.clock()
         if remaining <= 0:
-            raise TimeoutError("skill time budget exhausted")
+            raise SkillDeadlineExceeded("skill time budget exhausted")
         return min(float(requested), remaining)
 
     def press_key(self, key, duration):
@@ -85,15 +86,11 @@ class DeadlineControls:
 
     def move_camera(self, dx, dy):
         if self.deadline <= self.clock():
-            raise TimeoutError("skill time budget exhausted")
+            raise SkillDeadlineExceeded("skill time budget exhausted")
         return self.controls.move_camera(dx, dy)
 
     def release_all(self):
         return self.controls.release_all()
-
-
-class InputActionLimitExceeded(RuntimeError):
-    """A goal run tried to send input after reaching its per-run action budget."""
 
 
 class InputActionBudget:
@@ -107,7 +104,8 @@ class InputActionBudget:
 
     def consume(self):
         if self.exhausted:
-            raise InputActionLimitExceeded("input action limit reached")
+            raise InputActionLimitExceeded("input action limit reached",
+                                           actions_used=self.actions_used)
         self.actions_used += 1
 
 
@@ -154,7 +152,7 @@ class DeadlineDetector:
     def detect(self, image, queries, score_min=None, max_boxes=None):
         remaining = self.deadline - self.clock()
         if remaining <= 0:
-            raise TimeoutError("skill time budget exhausted")
+            raise SkillDeadlineExceeded("skill time budget exhausted")
         return self.detector.detect(image, queries, score_min=score_min, max_boxes=max_boxes,
                                     timeout=remaining)
 
@@ -633,13 +631,14 @@ class GoalExecutor:
                     "duration_seconds": max(0.0, self.clock() - begin)}
         except InputActionLimitExceeded as exc:
             evidence = {"failure_stage": "input_action_budget",
-                        "postcondition": "not_checked_budget_exhausted"}
-            if self.input_action_budget is not None:
-                evidence["input_actions"] = self.input_action_budget.actions_used
+                        "postcondition": "not_checked_budget_exhausted",
+                        "input_actions": (self.input_action_budget.actions_used
+                                          if self.input_action_budget is not None
+                                          else exc.actions_used)}
             return {"status": SkillStatus.FAILED.value, "result_code": "INPUT_ACTION_LIMIT",
                     "reason": f"max_actions: {exc}"[:300], "evidence": evidence,
                     "duration_seconds": max(0.0, self.clock() - begin)}
-        except TimeoutError as exc:
+        except SkillDeadlineExceeded as exc:
             evidence = {"failure_stage": "skill_deadline",
                         "postcondition": "not_checked_skill_timeout"}
             if self.input_action_budget is not None:
