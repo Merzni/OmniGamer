@@ -430,6 +430,10 @@ class ApproachTargetSkill:
     def _close_and_centered(self, box):
         if not box:
             return False
+        observed_query = " ".join(str(box.get("query", self.target_text)).casefold().split())
+        requested_query = " ".join(self.target_text.casefold().split())
+        if observed_query != requested_query or not self._crosshair_aimed(box):
+            return False
         height, center_error, _ = box_metrics(box)
         return (height > self.settings.reach_height
                 or float(box.get("y1", 1.0)) <= self.settings.reach_top_y) \

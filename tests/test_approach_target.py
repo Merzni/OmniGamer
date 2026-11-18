@@ -423,6 +423,24 @@ class ApproachTargetTests(unittest.TestCase):
         self.assertTrue(all(call[2] == 0.2 for call in cautious))
         self.assertTrue(any(row["state"] == "CLOSE_TARGET_HELD" for row in rows))
 
+    def test_lost_off_crosshair_target_never_triggers_cautious_forward(self):
+        targets = [
+            {"x1": 0.555, "x2": 0.659, "y1": 0.0, "y2": 0.89,
+             "score": 0.9, "query": "a tree trunk"},
+            {**reach_box(), "query": "a tree"},
+        ]
+        for target in targets:
+            with self.subTest(target=target):
+                skill, controls, _ = self.make_skill([[target], []])
+                result = skill.run()
+
+                cautious = [call for call in controls.calls
+                            if call[:2] == ("key", "w")
+                            and call[2] == skill.settings.close_target_held_duration]
+                self.assertEqual(cautious, [])
+                self.assertEqual(result.state, "LOST")
+                self.assertEqual(result.reason, "target_not_reacquired")
+
     def test_close_target_heuristic_uses_profile_reach_height(self):
         profile = GameProfile(game_id="height-threshold",
                               thresholds={"approach_reach_height": 0.8})
