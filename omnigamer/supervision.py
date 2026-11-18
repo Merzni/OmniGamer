@@ -276,7 +276,7 @@ class PlaySupervisor:
         count = facts.item_count(candidate["item"])
         return count is not None and count >= candidate["after_count"]
 
-    def observe(self, assessment, seconds, step, check_id=None):
+    def observe(self, assessment, seconds, step, check_id=None, action=None):
         self.experience_steps += 1
         self.no_progress_steps += 1
         self.no_progress_seconds += max(0, seconds) if math.isfinite(seconds) else 0
@@ -288,7 +288,9 @@ class PlaySupervisor:
                     change = self.pending["change"]
                     event.update(status="visual_confirmed", verified_change=True,
                                  change=change, first_check_id=self.pending["check_id"],
-                                 second_check_id=check_id, evidence=assessment.evidence)
+                                 second_check_id=check_id, evidence=assessment.evidence,
+                                 candidate_step=self.pending["step"],
+                                 candidate_action=self.pending.get("action"))
                     self.verified_changes += 1
                     self.last_change = change["kind"]
                     self.pending = None
@@ -296,7 +298,8 @@ class PlaySupervisor:
                     self.mode, self.recovery_remaining = "exploring", 0
                 else:
                     candidate = self._candidate(assessment)
-                    self.pending = ({"change": candidate, "step": step, "check_id": check_id}
+                    self.pending = ({"change": candidate, "step": step, "check_id": check_id,
+                                     "action": dict(action) if isinstance(action, dict) else None}
                                     if candidate else None)
                     event["status"] = "change_candidate" if candidate else "not_confirmed"
             else:

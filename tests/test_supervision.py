@@ -359,13 +359,29 @@ class ContinuousPlayTests(unittest.TestCase):
             play=PlaySupervisor()
             assessment=checked(scene="gameplay",pitch="level")
             first=memory.record_visual_check(1,"g","s",1,"post","free_play",assessment.model_dump())
-            play.observe(assessment,1,1,first)
+            action={"action_type":"look","x":0,"y":-50,"action_source":"vlm"}
+            play.observe(assessment,1,1,first,action=action)
             second=memory.record_visual_check(2,"g","s",2,"post","free_play",assessment.model_dump())
-            event=play.observe(assessment,1,2,second)
+            event=play.observe(assessment,1,2,second,
+                               action={"action_type":"walk","key":"w","duration":.5})
             memory.record_play_lesson(2,"g",event)
+            self.assertEqual(event["candidate_action"],action)
+            self.assertEqual(event["candidate_step"],1)
             self.assertEqual(memory.get_stats("g")["checked_play_outcomes"],1)
-            self.assertIn("Previously checked play outcome",memory.get_learning_context("0000000000000000","g"))
+            context=memory.get_learning_context("0000000000000000","g")
+            self.assertIn("Previously checked play outcome",context)
+            self.assertIn('"action_type": "look"',context)
+            self.assertIn("temporal association only; not proof of cause",context)
             with self.assertRaises(ValueError):memory.record_play_lesson(2,"another-game",event)
+
+    def test_malformed_stored_play_lesson_does_not_break_learning_context(self):
+        with tempfile.TemporaryDirectory() as folder:
+            memory = GameMemory(Path(folder) / "memory.db")
+            with memory._connection() as conn:
+                conn.execute("INSERT INTO play_lessons(timestamp,game_id,first_check_id,second_check_id,evidence) "
+                             "VALUES (?,?,?,?,?)", (1, "g", 1, 2, "not-json"))
+            context = memory.get_learning_context("0000000000000000", "g")
+            self.assertIn("No applicable action evidence", context)
 
 
 if __name__=="__main__":unittest.main()

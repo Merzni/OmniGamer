@@ -397,8 +397,20 @@ class GameMemory:
             outcomes = conn.execute("SELECT evidence FROM play_lessons WHERE game_id=? ORDER BY id DESC LIMIT 4",
                                     (game_id,)).fetchall()
         for (evidence,) in outcomes:
-            change = json.loads(evidence)["change"]
-            lines.append("Previously checked play outcome (not proof of a causal skill): " + json.dumps(change,ensure_ascii=False))
+            try:
+                outcome = json.loads(evidence)
+            except (TypeError, ValueError):
+                continue
+            change = outcome.get("change") if isinstance(outcome, dict) else None
+            if not isinstance(change, dict):
+                continue
+            lines.append("Previously checked play outcome (not proof of a causal skill): " +
+                         json.dumps(change, ensure_ascii=False))
+            candidate_action = outcome.get("candidate_action")
+            if isinstance(candidate_action, dict):
+                action_json = json.dumps(candidate_action, ensure_ascii=False, sort_keys=True)
+                lines.append("Action immediately before the first visual candidate "
+                             "(temporal association only; not proof of cause): " + action_json[:320])
         return "\n".join(lines)
 
     def get_repetition_warning(self, state_hash: str, game_id: str, action: Dict,

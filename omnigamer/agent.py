@@ -817,8 +817,14 @@ class OmniAgent:
         self._check_stop()
         supervisor_assessment = (assessment if decision.action_type not in {"look", "wait"}
                                  or config.assess_look_with_vlm else None)
+        candidate_action = {"action_type": decision.action_type,
+                            "action_source": self.last_action_source}
+        for field in ("key", "x", "y", "x2", "y2", "duration"):
+            value = getattr(decision, field, None)
+            if value is not None:
+                candidate_action[field] = value
         event = self.supervisor.observe(supervisor_assessment, time.perf_counter() - started,
-                                        self.step_count, check_id)
+                                        self.step_count, check_id, action=candidate_action)
         self._trace_stop("result_eval")
         if self._telemetry_trace:
             verdict = assessment.result if assessment is not None else None
