@@ -51,6 +51,10 @@ class MemoryTests(unittest.TestCase):
             conn.execute("CREATE TABLE dead_clicks (state_hash TEXT, x INTEGER, y INTEGER, "
                          "fail_count INTEGER, PRIMARY KEY(state_hash, x, y))")
             conn.execute("INSERT INTO dead_clicks VALUES ('old', 50, 100, 3)")
+            conn.execute("CREATE TABLE visual_checks (id INTEGER PRIMARY KEY, timestamp REAL, game_id TEXT, "
+                         "session_id TEXT, step INTEGER, phase TEXT, goal_id TEXT, assessment TEXT, error TEXT)")
+            conn.execute("INSERT INTO visual_checks VALUES (7, 1, 'game:test', 'old-session', 1, 'post', "
+                         "'free_play', '{}', '')")
         GameMemory(old_path)
         migrated = GameMemory(old_path)
         self.assertEqual(migrated.get_stats()["total_actions"], 1)
@@ -59,6 +63,9 @@ class MemoryTests(unittest.TestCase):
             self.assertEqual(conn.execute("SELECT commentary, game_id FROM experiences").fetchone(),
                              ("preserve", "legacy"))
             self.assertEqual(conn.execute("SELECT fail_count FROM dead_clicks").fetchone()[0], 3)
+            self.assertIn("action_json", {row[1] for row in conn.execute("PRAGMA table_info(visual_checks)")})
+            self.assertEqual(conn.execute("SELECT id, session_id, step FROM visual_checks").fetchone(),
+                             (7, "old-session", 1))
 
     def test_restart_retrieves_changed_and_unchanged_actions(self):
         self.record()

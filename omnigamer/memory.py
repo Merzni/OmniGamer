@@ -78,7 +78,10 @@ class GameMemory:
             conn.execute("CREATE TABLE IF NOT EXISTS agent_state (game_id TEXT PRIMARY KEY, value TEXT NOT NULL)")
             conn.execute("""CREATE TABLE IF NOT EXISTS visual_checks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp REAL, game_id TEXT, session_id TEXT,
-                step INTEGER, phase TEXT, goal_id TEXT, assessment TEXT, error TEXT)""")
+                step INTEGER, phase TEXT, goal_id TEXT, assessment TEXT, error TEXT, action_json TEXT)""")
+            visual_check_columns = {row[1] for row in conn.execute("PRAGMA table_info(visual_checks)")}
+            if "action_json" not in visual_check_columns:
+                conn.execute("ALTER TABLE visual_checks ADD COLUMN action_json TEXT")
             conn.execute("""CREATE TABLE IF NOT EXISTS goal_lessons (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp REAL, game_id TEXT, goal_id TEXT,
                 first_check_id INTEGER, second_check_id INTEGER, evidence TEXT,
@@ -193,11 +196,15 @@ class GameMemory:
             conn.execute("INSERT INTO agent_state VALUES (?,?) ON CONFLICT(game_id) DO UPDATE SET value=excluded.value",
                          (game_id, json.dumps(state, ensure_ascii=False)))
 
-    def record_visual_check(self, timestamp, game_id, session_id, step, phase, goal_id, assessment, error=""):
+    def record_visual_check(self, timestamp, game_id, session_id, step, phase, goal_id, assessment,
+                            error="", action=None):
         with self._connection() as conn:
-            return conn.execute("INSERT INTO visual_checks(timestamp,game_id,session_id,step,phase,goal_id,assessment,error) "
-                                "VALUES (?,?,?,?,?,?,?,?)", (timestamp,game_id,session_id,step,phase,goal_id,
-                                                           json.dumps(assessment, ensure_ascii=False),error)).lastrowid
+            return conn.execute("INSERT INTO visual_checks(timestamp,game_id,session_id,step,phase,goal_id,"
+                                "assessment,error,action_json) VALUES (?,?,?,?,?,?,?,?,?)",
+                                (timestamp,game_id,session_id,step,phase,goal_id,
+                                 json.dumps(assessment, ensure_ascii=False),error,
+                                 json.dumps(action, ensure_ascii=False, sort_keys=True) if action is not None else None)
+                                ).lastrowid
 
     def record_goal_lesson(self, timestamp, game_id, goal_id, first_check_id, second_check_id, evidence):
         if first_check_id == second_check_id or first_check_id is None or second_check_id is None:
@@ -240,7 +247,7 @@ class GameMemory:
         with self._connection() as conn:
             checks, provenance = [], []
             for check_id in (first, second):
-                row = conn.execute("SELECT game_id,goal_id,phase,assessment,error,session_id,step "
+                row = conn.execute("SELECT game_id,goal_id,phase,assessment,error,session_id,step,action_json "
                                    "FROM visual_checks WHERE id=?",
                                    (check_id,)).fetchone()
                 if not row or row[:3] != (game_id,"free_play","post") or row[4]:
@@ -249,14 +256,21 @@ class GameMemory:
                 if not assessment.usable or assessment.result != "progress":
                     raise ValueError("Uncertain/regressed outcomes cannot be confirmed")
                 checks.append(assessment)
-                provenance.append((row[5], row[6]))
-            first_session, first_step = provenance[0]
-            second_session, second_step = provenance[1]
+                provenance.append((row[5], row[6], row[7]))
+            first_session, first_step, first_action_json = provenance[0]
+            second_session, second_step, _ = provenance[1]
             if (not first_session or second_session != first_session
                     or not isinstance(first_step, int) or not isinstance(second_step, int)
                     or second_step <= first_step
                     or event.get("candidate_step") != first_step):
                 raise ValueError("Play lesson checks must be from one session and a later step")
+            try:
+                first_action = json.loads(first_action_json)
+            except (TypeError, ValueError):
+                first_action = None
+            if (not isinstance(first_action, dict)
+                    or first_action != event.get("candidate_action")):
+                raise ValueError("Play lesson action must match the action recorded with its first check")
             if (PlaySupervisor._candidate(checks[0]) != event.get("change")
                     or not PlaySupervisor._still_visible(event["change"], checks[1].after)):
                 raise ValueError("Visual evidence does not support this outcome")

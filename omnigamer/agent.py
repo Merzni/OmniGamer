@@ -839,12 +839,7 @@ class OmniAgent:
         self._check_stop()
         supervisor_assessment = (assessment if decision.action_type not in {"look", "wait"}
                                  or config.assess_look_with_vlm else None)
-        candidate_action = {"action_type": decision.action_type,
-                            "action_source": self.last_action_source}
-        for field in ("key", "x", "y", "x2", "y2", "duration"):
-            value = getattr(decision, field, None)
-            if value is not None:
-                candidate_action[field] = value
+        candidate_action = self._candidate_action(decision)
         event = self.supervisor.observe(supervisor_assessment, time.perf_counter() - started,
                                         self.step_count, check_id, action=candidate_action)
         self._trace_stop("result_eval")
@@ -999,10 +994,19 @@ class OmniAgent:
         write_started = time.perf_counter()
         check_id = self.memory.record_visual_check(time.time(), self.game_id, self.session_id,
                                                    self.step_count, phase, goal_id, assessment.model_dump(),
-                                                   self.last_assessment_error)
+                                                   self.last_assessment_error,
+                                                   action=self._candidate_action(decision))
         if self._telemetry_trace:
             self._telemetry_trace.add_ms("memory_write", (time.perf_counter() - write_started) * 1000)
         return assessment, check_id
+
+    def _candidate_action(self, decision):
+        action = {"action_type": decision.action_type, "action_source": self.last_action_source}
+        for field in ("key", "x", "y", "x2", "y2", "duration"):
+            value = getattr(decision, field, None)
+            if value is not None:
+                action[field] = value
+        return action
 
     def _decide(self, frame: Image.Image, context_hint: str) -> BrainDecision:
         started = time.perf_counter()

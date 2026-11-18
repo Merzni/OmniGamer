@@ -365,12 +365,15 @@ class ContinuousPlayTests(unittest.TestCase):
             memory=GameMemory(Path(folder)/"memory.db")
             play=PlaySupervisor()
             assessment=checked(scene="gameplay",pitch="level")
-            first=memory.record_visual_check(1,"g","s",1,"post","free_play",assessment.model_dump())
             action={"action_type":"look","x":0,"y":-50,"action_source":"vlm"}
+            first=memory.record_visual_check(1,"g","s",1,"post","free_play",assessment.model_dump(),
+                                             action=action)
             play.observe(assessment,1,1,first,action=action)
-            second=memory.record_visual_check(2,"g","s",2,"post","free_play",assessment.model_dump())
+            next_action={"action_type":"walk","key":"w","duration":.5,"action_source":"vlm"}
+            second=memory.record_visual_check(2,"g","s",2,"post","free_play",assessment.model_dump(),
+                                              action=next_action)
             event=play.observe(assessment,1,2,second,
-                               action={"action_type":"walk","key":"w","duration":.5})
+                               action=next_action)
             memory.record_play_lesson(2,"g",event)
             self.assertEqual(event["candidate_action"],action)
             self.assertEqual(event["candidate_step"],1)
@@ -380,6 +383,9 @@ class ContinuousPlayTests(unittest.TestCase):
             self.assertIn('"action_type": "look"',context)
             self.assertIn("temporal association only; not proof of cause",context)
             with self.assertRaises(ValueError):memory.record_play_lesson(2,"another-game",event)
+            forged = dict(event, candidate_action={"action_type": "mine", "key": "w"})
+            with self.assertRaisesRegex(ValueError, "action recorded with its first check"):
+                memory.record_play_lesson(3,"g",forged)
 
     def test_play_lesson_write_rechecks_same_session_and_later_step(self):
         with tempfile.TemporaryDirectory() as folder:
