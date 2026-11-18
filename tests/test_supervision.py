@@ -54,8 +54,15 @@ class CameraGuardTests(unittest.TestCase):
             FrameFacts(scene="gameplay", pitch="level", safe_footing=True,
                        target_at_crosshair=True),
             grounded_confident=True, require_grounded_level_view=True,
-            require_target_at_crosshair=True)
+            require_target_at_crosshair=True, target_at_crosshair_confident=True)
         self.assertEqual(action["action_type"], "mine")
+
+    def test_crosshair_target_without_confident_frame_facts_cannot_authorize_mining(self):
+        action, reason = CameraGuard().filter(dict(action_type="mine"),
+            FrameFacts(scene="gameplay", pitch="level", target_at_crosshair=True),
+            require_target_at_crosshair=True, target_at_crosshair_confident=False)
+        self.assertEqual(action["action_type"], "wait")
+        self.assertIn("под прицелом", reason)
 
     def test_extreme_vertical_command_is_bounded(self):
         guard = CameraGuard()

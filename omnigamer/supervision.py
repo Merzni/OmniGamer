@@ -18,7 +18,8 @@ class CameraGuard:
         self.vertical_offset = 0
 
     def filter(self, action, facts=None, grounded_confident=False,
-               require_grounded_level_view=False, require_target_at_crosshair=False):
+               require_grounded_level_view=False, require_target_at_crosshair=False,
+               target_at_crosshair_confident=False):
         result = dict(action)
         pitch = facts.pitch if facts else "unknown"
         scene = facts.scene if facts else result.get("scene_type", "unknown")
@@ -38,7 +39,8 @@ class CameraGuard:
             result.update(action_type="wait", duration=.5, key=None, x=None, y=None)
             reason = "Копание отменено: направление взгляда и безопасная опора не подтверждены."
         elif (kind == "mine" and require_target_at_crosshair
-              and (facts is None or facts.target_at_crosshair is not True)):
+              and (not target_at_crosshair_confident or facts is None
+                   or facts.target_at_crosshair is not True)):
             result.update(action_type="wait", duration=.5, key=None, x=None, y=None)
             reason = "Копание отменено: видимая цель не подтверждена под прицелом."
         if result["action_type"] == "look":

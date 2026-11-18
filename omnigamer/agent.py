@@ -608,6 +608,7 @@ class OmniAgent:
             grounded_confident=grounded_confident,
             require_grounded_level_view=require_grounded_level_view,
             require_target_at_crosshair=require_target_at_crosshair,
+            target_at_crosshair_confident=facts_confident,
         )
         self.last_guard_reason = guard_reason or profile_camera_reason
         if self.last_guard_reason:
@@ -646,7 +647,8 @@ class OmniAgent:
                     failed_conditions.append("pitch_not_level")
                 if require_grounded_level_view and not grounded_confident:
                     failed_conditions.append("grounded_confident_false")
-                if require_target_at_crosshair and facts.target_at_crosshair is not True:
+                if require_target_at_crosshair and (not facts_confident
+                                                    or facts.target_at_crosshair is not True):
                     failed_conditions.append("target_at_crosshair_unconfirmed")
                 self._telemetry_trace.data["decision"]["guard"] = {
                     "facts": {

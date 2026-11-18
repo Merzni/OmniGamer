@@ -582,6 +582,32 @@ class AgentMemoryTests(unittest.TestCase):
         self.assertEqual(result["decision"]["action_type"], "wait")
         self.assertIn("под прицелом", agent.last_guard_reason)
 
+    def test_low_confidence_crosshair_claim_cannot_authorize_target_only_mining_guard(self):
+        from omnigamer.perception import FrameFacts, VisualAssessment
+        facts=FrameFacts(scene="gameplay",pitch="level",target_at_crosshair=True)
+        self.VisionBrain.return_value.assess.return_value=VisualAssessment(
+            before=facts,after=facts,confidence=.7,
+            evidence="The target appears centered but is uncertain.",result="unknown")
+        self.VisionBrain.return_value.decide.return_value=BrainDecision(action_type="mine",duration=3)
+        agent=self.create(mine_requires_grounded_level_view=False,
+                          mine_requires_target_at_crosshair=True)
+        result=agent.step()
+        self.HumanInputController.return_value.hold_mouse.assert_not_called()
+        self.assertEqual(result["decision"]["action_type"],"wait")
+        self.assertIn("под прицелом",agent.last_guard_reason)
+
+    def test_confident_crosshair_fact_can_authorize_target_only_guard_with_unknown_outcome(self):
+        from omnigamer.perception import FrameFacts, VisualAssessment
+        facts=FrameFacts(scene="gameplay",pitch="level",target_at_crosshair=True)
+        self.VisionBrain.return_value.assess.return_value=VisualAssessment(
+            before=facts,after=facts,confidence=.95,
+            evidence="The intended target surface occupies the center point.",result="unknown")
+        self.VisionBrain.return_value.decide.return_value=BrainDecision(action_type="mine",duration=3)
+        agent=self.create(mine_requires_grounded_level_view=False,
+                          mine_requires_target_at_crosshair=True)
+        agent.step()
+        self.HumanInputController.return_value.hold_mouse.assert_called_once_with(button="left",duration=3)
+
     def test_unknown_check_retains_executed_experience_without_promoting_success(self):
         self.addCleanup(setattr,self.module.config,"verification_interval",self.module.config.verification_interval)
         self.module.config.verification_interval=1
