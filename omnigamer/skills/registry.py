@@ -173,6 +173,9 @@ def execute_wait_for_condition(args, **dependencies):
 
 def execute_click_menu_target(args, **dependencies):
     params = _validate(ClickMenuTargetParams, args)
+    # The goal runner shares this with gameplay skills; menu targeting uses
+    # prepare_target/check_target and does not consume the camera guard.
+    dependencies.pop("camera_guard", None)
     dependencies["recorder"] = _recorder_for("click_menu_target", params.model_dump(), dependencies)
     return _run_recorded(dependencies.get("recorder"),
                          lambda: click_menu_target(**params.model_dump(), **dependencies),

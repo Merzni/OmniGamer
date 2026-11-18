@@ -433,9 +433,17 @@ class VisionBrain:
             raise ValueError("Invalid menu target bounds")
         box=boxes[target.candidate_id-1] if target.candidate_id else bbox
         if target.candidate_id:
-            cx=(box[0]+box[2])/2
-            cy=(box[1]+box[3])/2
-            if not (bx<=cx<=bz and by<=cy<=bb):
+            box_width=box[2]-box[0];box_height=box[3]-box[1]
+            bbox_width=bz-bx;bbox_height=bb-by
+            intersection_width=max(0,min(box[2],bz)-max(box[0],bx))
+            intersection_height=max(0,min(box[3],bb)-max(box[1],by))
+            intersection=intersection_width*intersection_height
+            smaller_area=min(box_width*box_height,bbox_width*bbox_height)
+            overlap_ratio=intersection/max(1,smaller_area)
+            # The candidate id chooses a measured screen rectangle; VLM bbox
+            # edges can be imprecise. Require substantial overlap and bounded
+            # dimensions, then use the measured rectangle for the click point.
+            if (bbox_width>box_width*2 or bbox_height>box_height*2 or overlap_ratio<.2):
                 raise ValueError(f"Menu candidate {target.candidate_id} does not match returned bbox")
         x,y,z,b=box
         if not (0<=x<z<=1000 and 0<=y<b<=1000 and z-x>=15 and 8<=b-y<=200):

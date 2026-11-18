@@ -53,6 +53,19 @@ class GroundingTests(unittest.TestCase):
              self.assertRaisesRegex(ValueError,'does not match returned bbox'):
             self.brain.ground_click(self.frame,BrainDecision(action_type='click',target_label='PLAY'))
 
+    def test_measured_candidate_tolerates_bbox_edge_error_and_uses_geometry(self):
+        boxes=[[425,190,701,213],[342,192,420,232],[340,405,719,470],
+               [340,487,719,551],[340,568,719,633],[340,732,527,798],[531,732,718,798]]
+        response,_=self.target(candidate_id=3,bbox=[250,350,750,420],
+                               label='Одиночная игра',expected_result='world_select')
+        with patch('omnigamer.vision_brain.button_candidates',return_value=boxes), \
+             patch('omnigamer.vision_brain.requests.post',return_value=response):
+            result=self.brain.ground_click(self.frame,BrainDecision(action_type='click',
+                target_label='Одиночная игра',intent='Open the world list'),
+                profile=load_profile('minecraft'))
+        self.assertEqual((result.x,result.y),(530,438))
+        self.assertEqual(result.target_label,'Одиночная игра')
+
     def test_dark_outlines_recover_textured_menu_buttons(self):
         rng=np.random.default_rng(5);w,h=960,526
         pixels=np.empty((h,w,3),dtype=np.uint8);pixels[:]=[70,110,150]

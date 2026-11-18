@@ -7,6 +7,7 @@ from omnigamer.profiles import GameProfile
 from omnigamer.planner import GoalExecutor, GoalPlanner, InputActionBudget, BudgetControls, SkillOutcomeStore
 from omnigamer.skills.contracts import SkillStatus
 from omnigamer.skills.registry import default_registry
+from omnigamer.skills.registry import execute_click_menu_target
 from omnigamer.skills.menu import click_menu_target
 from omnigamer.vision_brain import BrainDecision
 
@@ -44,6 +45,18 @@ class MenuSkillTests(unittest.TestCase):
         self.assertEqual(result.evidence["target_label"], "Одиночная игра")
         self.assertEqual(result.evidence["input_actions"], 1)
         self.assertEqual(result.evidence["postcondition"], "pending_visual_verification")
+
+    def test_registered_menu_executor_discards_unrelated_camera_guard(self):
+        result = execute_click_menu_target(
+            {"target_label": "Одиночная игра", "intent": "Open the world list",
+             "expected_result": "World selection screen appears"},
+            capture=self.capture, controls=self.controls, profile=self.profile,
+            grounder=Mock(return_value=self.grounded), prepare_target=Mock(),
+            check_target=Mock(), camera_guard=Mock(), recorder=Mock())
+
+        self.assertEqual(result.result_code, "MENU_ACTION_UNCONFIRMED")
+        self.assertEqual(result.evidence["input_actions"], 1)
+        self.controls.click.assert_called_once_with(420, 540, button="left", hold_time=0.08)
 
     def test_preview_grounds_and_rechecks_target_without_sending_input(self):
         prepare, check = Mock(), Mock()
