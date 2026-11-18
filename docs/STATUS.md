@@ -328,3 +328,7 @@ TOCTOU review выявил, что `GoalPlanner` фильтровал gameplay-�
 ## Input-action budget сохраняет структурированный отказ (2026-11-18)
 
 Составной навык мог исчерпать общий input-action budget после одного или нескольких уже отправленных control-call; `InputActionLimitExceeded` блокировал дополнительный ввод, но выходил из `GoalExecutor` до записи `skill_result`. Теперь `_execute_skill()` возвращает `FAILED/INPUT_ACTION_LIMIT` с числом использованных действий и явным непроверенным постусловием; штатный путь сохраняет attempt и завершает run с `max_actions`. Усилен тест: третья операция действительно проходит через `BudgetControls` и блокируется, а не перехватывается mock-ом. Полный набор: 341 unittest; `pyflakes` без замечаний.
+
+## Per-skill timeout фиксируется как результат навыка (2026-11-18)
+
+`DeadlineControls` и bounded stop check выбрасывали `TimeoutError` при истечении выделенного навыку времени; исключение могло выйти из executor до `skill_result` и записи outcome, даже если составной навык уже успел отправить действия. Теперь `_execute_skill()` преобразует timeout в `FAILED/SKILL_TIMEOUT` с `failure_stage=skill_deadline`, доступным счётчиком вводов и непроверенным постусловием; дальше используется общий result/telemetry/store path. Регрессия проверяет истёкший `DeadlineControls` через `BudgetControls`, raw control не вызывается, попытка фиксируется без успеха. Полный набор: 342 unittest; `pyflakes` без замечаний.

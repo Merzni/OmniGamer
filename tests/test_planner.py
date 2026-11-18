@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 from PIL import Image
 from omnigamer.memory import GameMemory
-from omnigamer.planner import (BudgetControls, GoalExecutor, GoalPlan, GoalPlanner,
+from omnigamer.planner import (BudgetControls, DeadlineControls, GoalExecutor, GoalPlan, GoalPlanner,
                                InputActionBudget, InputActionLimitExceeded,
                                PlanningError, SkillOutcomeStore)
 from omnigamer.profiles import GameProfile
@@ -234,6 +234,35 @@ class GoalPlannerTests(unittest.TestCase):
             skill_result = next(row["result"] for row in logs if row["event"] == "skill_result")
             self.assertEqual(skill_result["result_code"], "INPUT_ACTION_LIMIT")
             self.assertEqual(skill_result["evidence"]["input_actions"], 2)
+
+    def test_skill_deadline_timeout_is_recorded_after_no_input_is_sent(self):
+        with tempfile.TemporaryDirectory() as temp:
+            budget = InputActionBudget(3)
+            raw_controls = Mock()
+            logs = []
+            planner = GoalPlanner(self.registry, lambda **_: plan_for())
+
+            def execute_skill(*_args):
+                controls = BudgetControls(DeadlineControls(
+                    raw_controls, deadline=1.0, clock=lambda: 2.0), budget)
+                controls.press_key("w", 0.1)
+
+            store = SkillOutcomeStore(Path(temp) / "outcomes.db")
+            runner = GoalExecutor(planner, self.registry, store, profile=self.profile, game_id="sim",
+                execute_skill=execute_skill, frame_provider=lambda: object(),
+                stop_check=lambda: None, input_action_budget=budget, logger=logs.append,
+                max_replans=0)
+
+            result = runner.run("move")
+
+            self.assertEqual(result["status"], "FAILED")
+            self.assertIn("skill_time_budget_exhausted", result["reason"])
+            self.assertEqual(budget.actions_used, 1)
+            self.assertEqual(raw_controls.press_key.call_count, 0)
+            skill_result = next(row["result"] for row in logs if row["event"] == "skill_result")
+            self.assertEqual(skill_result["result_code"], "SKILL_TIMEOUT")
+            self.assertEqual(skill_result["evidence"]["input_actions"], 1)
+            self.assertEqual(store.summary("sim")[0]["successes"], 0)
         planner = GoalPlanner(self.registry, lambda **_: plan_for(args={"direction": "up", "seconds": 99}))
         with self.assertRaises(PlanningError):
             planner.plan(frame=None, goal="x", profile=self.profile)

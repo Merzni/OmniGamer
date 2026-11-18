@@ -639,6 +639,15 @@ class GoalExecutor:
             return {"status": SkillStatus.FAILED.value, "result_code": "INPUT_ACTION_LIMIT",
                     "reason": f"max_actions: {exc}"[:300], "evidence": evidence,
                     "duration_seconds": max(0.0, self.clock() - begin)}
+        except TimeoutError as exc:
+            evidence = {"failure_stage": "skill_deadline",
+                        "postcondition": "not_checked_skill_timeout"}
+            if self.input_action_budget is not None:
+                evidence["input_actions"] = self.input_action_budget.actions_used
+            return {"status": SkillStatus.FAILED.value, "result_code": "SKILL_TIMEOUT",
+                    "reason": f"skill_time_budget_exhausted: {exc}"[:300],
+                    "evidence": evidence,
+                    "duration_seconds": max(0.0, self.clock() - begin)}
         return result.model_dump() if hasattr(result, "model_dump") else result
 
     def run(self, goal):
