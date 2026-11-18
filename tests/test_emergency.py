@@ -130,6 +130,8 @@ class EmergencyHotkeyTests(unittest.TestCase):
         agent = OmniAgent.__new__(OmniAgent)
         agent._stop_event = threading.Event()
         agent._stop_reason = None
+        agent._vlm_request_lock = threading.Lock()
+        agent._vlm_request_active = None
         started = threading.Event()
 
         def blocked_request():
@@ -142,6 +144,40 @@ class EmergencyHotkeyTests(unittest.TestCase):
         with self.assertRaises(InterruptedError):
             agent._call_interruptibly(blocked_request)
         self.assertLess(time.perf_counter() - begin, 0.5)
+
+    def test_interrupted_request_cannot_overlap_the_next_vlm_request(self):
+        agent = OmniAgent.__new__(OmniAgent)
+        agent._stop_event = threading.Event()
+        agent._stop_reason = None
+        agent._vlm_request_lock = threading.Lock()
+        agent._vlm_request_active = None
+        started, release, finished = threading.Event(), threading.Event(), threading.Event()
+
+        def blocked_request():
+            started.set()
+            release.wait(1)
+            finished.set()
+
+        def interrupt_after_start():
+            self.assertTrue(started.wait(1))
+            agent._stop_event.set()
+
+        timer = threading.Thread(target=interrupt_after_start, daemon=True)
+        timer.start()
+        with self.assertRaises(InterruptedError):
+            agent._call_interruptibly(blocked_request)
+        timer.join(1)
+
+        agent._stop_event.clear()
+        next_called = threading.Event()
+        with self.assertRaisesRegex(RuntimeError, "previous VLM request is still running"):
+            agent._call_interruptibly(next_called.set)
+        self.assertFalse(next_called.is_set())
+
+        release.set()
+        self.assertTrue(finished.wait(1))
+        self.assertTrue(agent._vlm_request_active.wait(1))
+        self.assertIs(agent._call_interruptibly(lambda: "next request"), "next request")
 
 
 if __name__ == "__main__":

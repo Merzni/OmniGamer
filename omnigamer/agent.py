@@ -2,7 +2,7 @@
 import logging
 import sys
 import time
-from threading import Event, RLock, Thread
+from threading import Event, Lock, RLock, Thread
 from uuid import uuid4
 from typing import Optional, Dict
 from PIL import Image
@@ -58,6 +58,8 @@ class OmniAgent:
         self.persona = StreamerPersona(name=config.persona_name)
         self._stop_event = Event()
         self._stop_reason = None
+        self._vlm_request_lock = Lock()
+        self._vlm_request_active = None
         self.emergency_hotkey = (EmergencyHotkey(
             config.emergency_key, self.request_stop, on_error=self._emergency_hotkey_failed)
                                  if emergency_hotkey_enabled else None)
@@ -184,6 +186,10 @@ class OmniAgent:
         self._check_stop()
         result = {}
         completed = Event()
+        with self._vlm_request_lock:
+            if self._vlm_request_active is not None and not self._vlm_request_active.is_set():
+                raise RuntimeError("A previous VLM request is still running after interruption")
+            self._vlm_request_active = completed
 
         def invoke():
             try:
@@ -193,7 +199,11 @@ class OmniAgent:
             finally:
                 completed.set()
 
-        Thread(target=invoke, name="OmniGamerVLMRequest", daemon=True).start()
+        try:
+            Thread(target=invoke, name="OmniGamerVLMRequest", daemon=True).start()
+        except BaseException:
+            completed.set()
+            raise
         while not completed.wait(0.02):
             self._check_stop()
         self._check_stop()
