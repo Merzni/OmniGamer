@@ -1,6 +1,6 @@
 # OmniGamer: назначение и архитектура
 
-Проверено по исходникам 2026-11-15. Состояние работ: [STATUS.md](STATUS.md). Команды: [DEVELOPMENT.md](DEVELOPMENT.md).
+Проверено по исходникам 2026-11-18. Состояние работ: [STATUS.md](STATUS.md). Команды: [DEVELOPMENT.md](DEVELOPMENT.md).
 
 Актуальное поведение 2026-11-14: [Непрерывная игра и проверка опыта](CONTINUOUS_PLAY.md). Обязательный план целей и остановка после достижений отменены по уточнению владельца.
 
@@ -19,6 +19,8 @@
 Реестр навыков `omnigamer/skills/registry.py` описывает шесть `SkillSpec` с JSON Schema параметров. `approach_target` и базовые функции в `skills/basic.py` возвращают общий `SkillResult`; `SkillStepRecorder` и `ApproachTargetRecorder` пишут версионированный `skill_steps.jsonl`, а `summarize_run.py` считает финальные статусы по навыкам. CLI использует реестр через `--goal`; legacy-цикл выбирается только `--legacy`, а `--dry-run` пишет `would_send` без ввода.
 
 Срез 2026-11-15: `omnigamer/planner.py` проверяет до шести goal-шагов по реестру, схемам и profile actions/regions; невалидный ответ получает одну повторную попытку. Goal output ограничен конфигом `goal_plan_max_tokens=256` (default); на сохранённом Stage 8 кадре валидный трёхшаговый план получен за 86.06 с после timeout живого запроса на старом лимите. Запрос предпочитает краткий план из 1–3 шагов, но строгая schema остаётся. В CLI `--goal` `motion_limits.max_actions` ограничивает суммарные control-вызовы, отдельно от `goal_max_skill_steps`; `input_action_budget` записывает фактический счётчик, не включая release. Legacy выбирается только через `--legacy`, а `--dry-run` пишет `would_send` без ввода и держит память в SQLite `:memory:`. `tests/sim/` проверяет путь на двух синтетических профилях. `omnigamer/doctor.py` выполняет read-only диагностику, включая доступ к active input desktop без `SendInput`; `start_all`/`stop_all` принимают пути сервисов из переменных окружения. Реальный Stage 8 пройден: doctor, десять планов на пяти сохранённых кадрах, CLI replay и dry-run реального VLM-плана через синтетический capture/detector. Артефакты и ограничения перечислены в [STATUS.md](STATUS.md).
+
+Актуальный срез 2026-11-18: GoalPlanner ограничивает навыки по профильной геометрии меню, валидирует immediate postcondition перехода из главного меню и отвергает повтор плана, ведущий к игровому состоянию вместо списка миров. Перед каждым навыком GoalExecutor повторно проверяет свежий кадр, а mining-взаимодействие пропускает только для явно перечисленного в mine_actions действия после уверенного профильного preflight; общий бюджет и deadlines оборачивают контроллер и detector. click_menu_target локализует запрос через screen-only VLM grounding и проверяет неизменность участка цели до клика. Полный синтетический suite — 354 теста; он проходит и при пустом runtime profile directory. Свежий live dry-run на открытом Minecraft подтвердил первый шаг только по «Одиночная игра» с нулём вводов; read-only doctor подтвердил VLM/detector, но OpenInputDesktop вернул WinError 5. Реальный клик, переход в мир и успешная добыча не подтверждены.
 
 ## Поток одного шага
 
