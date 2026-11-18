@@ -35,10 +35,14 @@ def _label_words(value):
     return re.findall(r"[a-z0-9а-яё]+", str(value).casefold())
 
 
+def normalize_menu_label(value):
+    """Normalize punctuation and spacing while preserving the localized words."""
+    return " ".join(_label_words(value))
+
+
 def _menu_target_matches(requested, grounded, expected_result, profile):
-    requested_words = _label_words(requested)
-    localized_words = _label_words(grounded.target_label)
-    localized = " ".join(localized_words)
+    requested_label = normalize_menu_label(requested)
+    localized = normalize_menu_label(grounded.target_label)
     if localized in {"visible world row", "play selected world"}:
         if "world_selection" not in profile.ui_adapters:
             return False
@@ -50,7 +54,7 @@ def _menu_target_matches(requested, grounded, expected_result, profile):
                 and grounded.menu_state == "world_selected" and result == "gameplay"):
             return True
         return False
-    return bool(requested_words and requested_words == localized_words)
+    return bool(requested_label and requested_label == localized)
 
 
 class ClickMenuTargetParams(BaseModel):

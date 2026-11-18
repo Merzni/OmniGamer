@@ -18,6 +18,13 @@ class GameProfileTests(unittest.TestCase):
         self.assertEqual(profile.detector_queries["tree_trunk"], ["a tree trunk", "a tree"])
         self.assertIn("hotbar", profile.regions)
 
+    def test_main_menu_transition_mapping_is_configurable_and_validated(self):
+        profile = GameProfile(game_id="menu", ui_adapters=["stacked_main_menu"],
+                              main_menu_target_transitions={"Single Player": "world_select"})
+        self.assertEqual(profile.main_menu_target_transitions["Single Player"], "world_select")
+        with self.assertRaises(ValueError):
+            GameProfile(game_id="menu", main_menu_target_transitions={"Single Player": "gameplay"})
+
     def test_crosshair_target_precondition_is_explicitly_profiled(self):
         self.assertFalse(GameProfile(game_id="generic").mine_requires_target_at_crosshair)
         self.assertFalse(GameProfile(game_id="generic").mine_requires_grounded_level_view)

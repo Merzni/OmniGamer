@@ -91,6 +91,46 @@ class GoalPlannerTests(unittest.TestCase):
         self.assertEqual(accepted.steps[0].args["expected_result"],
                          "World selection screen appears")
 
+    def test_profiled_main_menu_transition_corrects_skipped_world_selection(self):
+        profile = GameProfile(game_id="minecraft", ui_adapters=[
+            "world_selection", "stacked_main_menu"],
+            main_menu_target_transitions={"Одиночная игра": "world_select"})
+        planner = GoalPlanner(default_registry(), lambda **_: None)
+        frame = Image.new("RGB", (800, 600))
+        skipped = {"steps": [{
+            "skill": "click_menu_target",
+            "args": {"target_label": " ОДИНОЧНАЯ ИГРА! ",
+                     "intent": "Start single-player and locate a tree",
+                     "expected_result": "Game world loads, camera faces the selected world"},
+            "expected_result": "Game world loads, camera faces the selected world",
+            "success_check": "Gameplay is visible, with no menu overlay",
+        }]}
+        with patch("omnigamer.planner.stacked_main_menu_layout", return_value=True):
+            corrected = planner.validate(skipped, profile=profile,
+                                         menu_visible=True, frame=frame)
+        step = corrected.steps[0]
+        self.assertEqual(step.args["expected_result"], "World selection screen appears")
+        self.assertEqual(step.expected_result, "World selection screen appears")
+        self.assertEqual(step.success_check, "World selection screen is visible")
+
+    def test_profiled_main_menu_transition_does_not_apply_without_layout_evidence(self):
+        profile = GameProfile(game_id="minecraft", ui_adapters=[
+            "world_selection", "stacked_main_menu"],
+            main_menu_target_transitions={"Одиночная игра": "world_select"})
+        planner = GoalPlanner(default_registry(), lambda **_: None)
+        frame = Image.new("RGB", (800, 600))
+        skipped = {"steps": [{
+            "skill": "click_menu_target",
+            "args": {"target_label": "Одиночная игра", "intent": "Start single-player",
+                     "expected_result": "Game world loads"},
+            "expected_result": "Game world loads",
+            "success_check": "Gameplay is visible",
+        }]}
+        with patch("omnigamer.planner.stacked_main_menu_layout", return_value=False):
+            accepted = planner.validate(skipped, profile=profile,
+                                        menu_visible=False, frame=frame)
+        self.assertEqual(accepted.steps[0].expected_result, "Game world loads")
+
     def test_recognized_menu_filters_and_rejects_gameplay_interactions(self):
         profile = GameProfile(game_id="menu", camera_type="first_person",
                               ui_adapters=["stacked_main_menu"],

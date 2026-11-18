@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .config import config
 from .memory import GameMemory
 from .skills.contracts import SkillStatus
-from .skills.menu import classify_menu_result
+from .skills.menu import classify_menu_result, normalize_menu_label
 from .ui_grounding import (button_candidates, has_profile_menu_layout,
                            stacked_main_menu_layout)
 
@@ -312,6 +312,20 @@ class GoalPlanner:
             if step.skill == "click_menu_target":
                 if not profile or not profile.ui_adapters:
                     raise ValueError("Skill 'click_menu_target' requires a profile UI adapter")
+                if main_menu_layout:
+                    target_label = normalize_menu_label(values["target_label"])
+                    mapped_transition = next((transition for label, transition in
+                                              profile.main_menu_target_transitions.items()
+                                              if normalize_menu_label(label) == target_label), None)
+                    if mapped_transition == "world_select":
+                        canonical_result = "World selection screen appears"
+                        canonical_check = "World selection screen is visible"
+                        values["expected_result"] = canonical_result
+                        step = step.model_copy(update={
+                            "args": {**step.args, "expected_result": canonical_result},
+                            "expected_result": canonical_result,
+                            "success_check": canonical_check,
+                        })
                 if values["expected_result"].strip().casefold() != step.expected_result.strip().casefold():
                     raise ValueError("click_menu_target expected_result must match the step postcondition")
                 if (main_menu_layout
