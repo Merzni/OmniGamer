@@ -153,7 +153,7 @@ class GoalSupervisor:
                 if self.goal_id == "collect_resource" and self.baseline is None:
                     self.baseline = assessment.before.item_count(self.target_item)
                 event.update(target_item=self.target_item, baseline=self.baseline)
-                met = self._met(assessment.after) and assessment.result != "regressed"
+                met = self._met(assessment.after) and assessment.result == "progress"
                 event["status"] = "goal_candidate" if met else (
                     "suspected_regression" if assessment.result == "regressed" else "not_confirmed")
                 if met:
@@ -282,7 +282,7 @@ class PlaySupervisor:
         self.no_progress_seconds += max(0, seconds) if math.isfinite(seconds) else 0
         event = {"status": "unverified", "completed": False, "verified_change": False}
         if assessment is not None:
-            if assessment.usable and assessment.result != "regressed":
+            if assessment.usable and assessment.result == "progress":
                 if (self.pending and step != self.pending["step"] and check_id != self.pending["check_id"]
                         and self._still_visible(self.pending["change"], assessment.after)):
                     change = self.pending["change"]

@@ -136,6 +136,39 @@ class GoalTests(unittest.TestCase):
             goal.observe(bad,1,2)
             self.assertFalse(goal.observe(checked(scene="gameplay",pitch="level"),1,3)["completed"])
 
+    def test_unknown_result_cannot_confirm_goal_from_matching_structured_facts(self):
+        for result in ("unknown", "blocked"):
+            with self.subTest(result=result):
+                goal = GoalSupervisor()
+                goal.set_goal("restore_view")
+                uncertain = checked(scene="gameplay", pitch="level").model_copy(
+                    update={"result": result})
+
+                self.assertFalse(goal.observe(uncertain, 1, 1, 10)["completed"])
+                self.assertFalse(goal.observe(uncertain, 1, 2, 11)["completed"])
+                self.assertFalse(goal.observe(checked(scene="gameplay", pitch="level"), 1, 3, 12)["completed"])
+
+    def test_unknown_or_blocked_result_cannot_confirm_play_change(self):
+        before = FrameFacts(scene="menu")
+        after = FrameFacts(scene="gameplay")
+        for result in ("unknown", "blocked"):
+            with self.subTest(result=result):
+                play = PlaySupervisor()
+                candidate = VisualAssessment(before=before, after=after, confidence=.95,
+                    evidence="The gameplay screen is now visible.", result=result)
+                self.assertFalse(play.observe(candidate, 1, 1, 10)["verified_change"])
+                self.assertFalse(play.observe(candidate, 1, 2, 11)["verified_change"])
+                self.assertEqual(play.verified_changes, 0)
+
+        play = PlaySupervisor()
+        first = VisualAssessment(before=before, after=after, confidence=.95,
+            evidence="The gameplay screen is now visible.", result="progress")
+        unknown_followup = first.model_copy(update={"result": "unknown"})
+        play.observe(first, 1, 1, 20)
+        event = play.observe(unknown_followup, 1, 2, 21)
+        self.assertFalse(event["verified_change"])
+        self.assertEqual(play.verified_changes, 0)
+
     def test_completed_goal_advances_plan_and_resets_budget(self):
         goal=GoalSupervisor()
         goal.observe(checked(scene="gameplay",pitch="down"),1,1)
@@ -231,6 +264,31 @@ class EvidenceMemoryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.memory.record_goal_lesson(2,"g","restore_view",first,second,
                 {"goal_id":"restore_view","status":"visual_confirmed","completed":True})
+
+    def test_unknown_result_cannot_be_persisted_as_goal_or_play_lesson(self):
+        facts = FrameFacts(scene="gameplay", pitch="level")
+        for result in ("unknown", "blocked"):
+            with self.subTest(result=result):
+                assessment = VisualAssessment(before=FrameFacts(scene="gameplay", pitch="down"),
+                    after=facts, confidence=.95, evidence="The level gameplay view is visible.",
+                    result=result)
+                first_goal = self.memory.record_visual_check(1, "g", "s", 1, "post", "restore_view",
+                                                             assessment.model_dump())
+                second_goal = self.memory.record_visual_check(2, "g", "s", 2, "post", "restore_view",
+                                                              assessment.model_dump())
+                goal_event = {"goal_id": "restore_view", "status": "visual_confirmed", "completed": True,
+                              "baseline": None}
+                with self.assertRaises(ValueError):
+                    self.memory.record_goal_lesson(2, "g", "restore_view", first_goal, second_goal, goal_event)
+
+                first_play = self.memory.record_visual_check(3, "g", "s", 3, "post", "free_play",
+                                                             assessment.model_dump())
+                second_play = self.memory.record_visual_check(4, "g", "s", 4, "post", "free_play",
+                                                              assessment.model_dump())
+                play_event = {"verified_change": True, "change": {"kind": "restored_forward_view"},
+                              "first_check_id": first_play, "second_check_id": second_play}
+                with self.assertRaises(ValueError):
+                    self.memory.record_play_lesson(4, "g", play_event)
 
 
 class ContinuousPlayTests(unittest.TestCase):

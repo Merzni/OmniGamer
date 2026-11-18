@@ -216,7 +216,7 @@ class GameMemory:
                     raise ValueError("Visual confirmation does not match this game and goal")
                 from .perception import VisualAssessment
                 assessment = VisualAssessment.model_validate_json(row[3])
-                if (not assessment.usable or assessment.result == "regressed"
+                if (not assessment.usable or assessment.result != "progress"
                         or not predicate._met(assessment.after)):
                     raise ValueError("Uncertain assessment cannot become a confirmed lesson")
             conn.execute("INSERT INTO goal_lessons(timestamp,game_id,goal_id,first_check_id,second_check_id,evidence) "
@@ -243,7 +243,7 @@ class GameMemory:
                 if not row or row[:3] != (game_id,"free_play","post") or row[4]:
                     raise ValueError("Visual checks must belong to this continuous-play profile")
                 assessment = VisualAssessment.model_validate_json(row[3])
-                if not assessment.usable or assessment.result == "regressed":
+                if not assessment.usable or assessment.result != "progress":
                     raise ValueError("Uncertain/regressed outcomes cannot be confirmed")
                 checks.append(assessment)
             if (PlaySupervisor._candidate(checks[0]) != event.get("change")
