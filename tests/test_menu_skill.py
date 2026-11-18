@@ -102,6 +102,17 @@ class MenuSkillTests(unittest.TestCase):
         self.assertEqual(result.result_code, "MENU_ACTION_UNCONFIRMED")
         self.controls.click.assert_called_once()
 
+    def test_literal_world_row_alias_still_requires_unselected_menu_state(self):
+        measured = self.grounded.model_copy(update={
+            "target_label": "visible_world_row", "menu_id": "world_select",
+            "menu_state": "world_selected", "expected_result": "world_selected"})
+        with self.assertRaisesRegex(ValueError, "does not match the requested target"):
+            click_menu_target("visible_world_row", "Select a world", "world_selected",
+                capture=self.capture, controls=self.controls, profile=self.profile,
+                grounder=Mock(return_value=measured), prepare_target=Mock(),
+                check_target=Mock())
+        self.controls.click.assert_not_called()
+
     def test_measured_play_alias_requires_selected_world_and_gameplay_postcondition(self):
         measured = self.grounded.model_copy(update={
             "target_label": "Play selected world", "menu_id": "world_select",
@@ -112,6 +123,17 @@ class MenuSkillTests(unittest.TestCase):
             check_target=Mock())
         self.assertEqual(result.result_code, "MENU_ACTION_UNCONFIRMED")
         self.controls.click.assert_called_once()
+
+    def test_literal_play_alias_still_requires_selected_world_state(self):
+        measured = self.grounded.model_copy(update={
+            "target_label": "Play selected world", "menu_id": "world_select",
+            "menu_state": "no_selection", "expected_result": "gameplay"})
+        with self.assertRaisesRegex(ValueError, "does not match the requested target"):
+            click_menu_target("Play selected world", "Start the selected world", "gameplay",
+                capture=self.capture, controls=self.controls, profile=self.profile,
+                grounder=Mock(return_value=measured), prepare_target=Mock(),
+                check_target=Mock())
+        self.controls.click.assert_not_called()
 
     def test_window_geometry_change_cancels_click(self):
         self.capture.get_client_rect.side_effect = [

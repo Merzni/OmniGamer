@@ -38,20 +38,19 @@ def _label_words(value):
 def _menu_target_matches(requested, grounded, expected_result, profile):
     requested_words = _label_words(requested)
     localized_words = _label_words(grounded.target_label)
-    if requested_words and requested_words == localized_words:
-        return True
-
-    if "world_selection" not in profile.ui_adapters:
-        return False
-    result = _known_menu_result(expected_result)
     localized = " ".join(localized_words)
-    if (localized == "visible world row" and grounded.menu_id == "world_select"
-            and grounded.menu_state == "no_selection" and result == "world_selected"):
-        return True
-    if (localized == "play selected world" and grounded.menu_id == "world_select"
-            and grounded.menu_state == "world_selected" and result == "gameplay"):
-        return True
-    return False
+    if localized in {"visible world row", "play selected world"}:
+        if "world_selection" not in profile.ui_adapters:
+            return False
+        result = _known_menu_result(expected_result)
+        if (localized == "visible world row" and grounded.menu_id == "world_select"
+                and grounded.menu_state == "no_selection" and result == "world_selected"):
+            return True
+        if (localized == "play selected world" and grounded.menu_id == "world_select"
+                and grounded.menu_state == "world_selected" and result == "gameplay"):
+            return True
+        return False
+    return bool(requested_words and requested_words == localized_words)
 
 
 class ClickMenuTargetParams(BaseModel):
