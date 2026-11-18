@@ -164,6 +164,7 @@ class ApproachTargetSkill:
         self._last_center = None
         self._selection_uncertain = False
         self._selection_uncertain_streak = 0
+        self._reacquire_candidate = None
         self._missing_frames = 0
         self._lost_search_turns = 0
         self._aligning = False
@@ -295,6 +296,7 @@ class ApproachTargetSkill:
         self._selection_uncertain = False
         if not boxes:
             self._selection_uncertain_streak = 0
+            self._reacquire_candidate = None
             return None
         if self._last_center is None:
             selected = max(boxes, key=lambda item: item["score"])
@@ -308,15 +310,45 @@ class ApproachTargetSkill:
                 if center_distance <= self.settings.track_max_center_shift:
                     eligible.append((self._track_cost(item, previous), item, center_distance))
             if not eligible:
-                self._selection_uncertain_streak = 0
-                return None
-            ranked = sorted(eligible, key=lambda row: row[0])
-            _, selected, _ = ranked[0]
-            if (len(ranked) > 1 and ranked[1][0] - ranked[0][0] <=
-                    self.settings.track_ambiguity_margin):
-                self._selection_uncertain = True
-                self._selection_uncertain_streak += 1
-                return None
+                if self._missing_frames < self.settings.lost_frames:
+                    self._selection_uncertain_streak = 0
+                    self._reacquire_candidate = None
+                    return None
+                if len(boxes) != 1:
+                    self._reacquire_candidate = None
+                    self._selection_uncertain = True
+                    self._selection_uncertain_streak += 1
+                    return None
+                candidate = boxes[0]
+                candidate_query = " ".join(str(candidate.get("query", self.target_text))
+                                            .casefold().split())
+                previous_candidate = self._reacquire_candidate
+                stable_reacquisition = bool(
+                    previous_candidate
+                    and candidate_query == previous_candidate["query"]
+                    and math.hypot(
+                        (candidate["x1"] + candidate["x2"] -
+                         previous_candidate["box"]["x1"] - previous_candidate["box"]["x2"]) / 2,
+                        (candidate["y1"] + candidate["y2"] -
+                         previous_candidate["box"]["y1"] - previous_candidate["box"]["y2"]) / 2)
+                    <= self.settings.track_max_center_shift)
+                if not stable_reacquisition:
+                    self._reacquire_candidate = {"box": dict(candidate), "query": candidate_query}
+                    self._selection_uncertain = True
+                    self._selection_uncertain_streak = 1
+                    return None
+                selected = candidate
+                self._reacquire_candidate = None
+            else:
+                ranked = sorted(eligible, key=lambda row: row[0])
+                _, selected, _ = ranked[0]
+                if (len(ranked) > 1 and ranked[1][0] - ranked[0][0] <=
+                        self.settings.track_ambiguity_margin):
+                    self._selection_uncertain = True
+                    self._selection_uncertain_streak += 1
+                    self._reacquire_candidate = None
+                    return None
+                self._reacquire_candidate = None
         self._selection_uncertain_streak = 0
         self._last_center = ((selected["x1"] + selected["x2"]) / 2,
                              (selected["y1"] + selected["y2"]) / 2)

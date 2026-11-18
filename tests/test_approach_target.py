@@ -244,6 +244,52 @@ class ApproachTargetTests(unittest.TestCase):
         nearby = box(0.58, 0.2)
         self.assertEqual(skill._select({"boxes": [nearby]}), nearby)
 
+    def test_lost_target_search_reacquires_only_after_stable_unique_candidate(self):
+        skill, _, _ = self.make_skill([[]], settings=ApproachTargetSettings(
+            track_max_center_shift=0.1))
+        original = box(0.5, 0.2)
+        distant = box(0.82, 0.2)
+        self.assertEqual(skill._select({"boxes": [original]}), original)
+        skill._missing_frames = skill.settings.lost_frames
+
+        self.assertIsNone(skill._select({"boxes": [distant]}))
+        self.assertIsNone(skill._select({"boxes": [box(0.9, 0.2), box(0.82, 0.2)]}))
+        self.assertEqual(skill._last_center, (0.5, 0.5))
+        self.assertIsNone(skill._select({"boxes": [distant]}))
+        self.assertEqual(skill._select({"boxes": [distant]}), distant)
+        self.assertEqual(skill._last_center, (0.82, 0.5))
+
+    def test_lost_target_search_keeps_multiple_distant_candidates_uncertain(self):
+        skill, _, _ = self.make_skill([[]], settings=ApproachTargetSettings(
+            track_max_center_shift=0.1))
+        skill._select({"boxes": [box(0.5, 0.2)]})
+        skill._missing_frames = skill.settings.lost_frames
+        candidates = [box(0.82, 0.2), box(0.94, 0.2)]
+
+        self.assertIsNone(skill._select({"boxes": candidates}))
+        self.assertTrue(skill._selection_uncertain)
+        self.assertIsNone(skill._select({"boxes": candidates}))
+        self.assertEqual(skill._selection_uncertain_streak, 2)
+        self.assertEqual(skill._last_center, (0.5, 0.5))
+
+    def test_search_look_rebinds_stable_distant_target_without_claiming_completion(self):
+        original, reacquired = box(0.5, 0.2), box(0.82, 0.2)
+        skill, _, _ = self.make_skill(
+            [[original], [], [reacquired], [reacquired]],
+            settings=ApproachTargetSettings(lost_frames=1, lost_search_turns=1,
+                                            track_max_center_shift=0.1, max_impulses=2))
+        rows = []
+        skill.recorder = lambda row, before, after: rows.append(row)
+
+        result = skill.run()
+
+        search_rows = [row for row in rows if row["action"]
+                       and row["action"].get("type") == "search_look"]
+        self.assertEqual(result.reason, "max_actions")
+        self.assertEqual(len(search_rows), 1)
+        self.assertAlmostEqual(search_rows[0]["box"]["after"]["x1"], reacquired["x1"])
+        self.assertNotEqual(result.state, "REACHED")
+
     def test_target_tracker_reports_symmetric_candidates_as_uncertain(self):
         skill, _, _ = self.make_skill([[]], settings=ApproachTargetSettings(
             track_max_center_shift=0.2, track_ambiguity_margin=0.02))
