@@ -213,26 +213,27 @@ class GoalPlannerTests(unittest.TestCase):
             budget = InputActionBudget(2)
             raw_controls = Mock()
             calls = []
+            logs = []
             planner = GoalPlanner(self.registry, lambda **_: calls.append("plan") or plan_for())
 
             def execute_skill(*_args):
                 controls = BudgetControls(raw_controls, budget)
-                try:
-                    controls.press_key("w", 0.1)
-                    controls.move_camera(10, 0)
-                    controls.hold_mouse("left", 0.1)
-                except InputActionLimitExceeded as exc:
-                    return SkillResult(status=SkillStatus.FAILED, result_code="FAILED", reason=str(exc))
+                controls.press_key("w", 0.1)
+                controls.move_camera(10, 0)
+                controls.hold_mouse("left", 0.1)
 
             runner = GoalExecutor(planner, self.registry, SkillOutcomeStore(Path(temp) / "outcomes.db"),
                 profile=self.profile, game_id="sim", execute_skill=execute_skill,
                 frame_provider=lambda: object(), stop_check=lambda: None,
-                input_action_budget=budget)
+                input_action_budget=budget, logger=logs.append)
             result = runner.run("move")
             self.assertEqual(result["reason"], "max_actions")
             self.assertEqual(result["input_actions_used"], 2)
             self.assertEqual(len(calls), 1)
             self.assertEqual(raw_controls.hold_mouse.call_count, 0)
+            skill_result = next(row["result"] for row in logs if row["event"] == "skill_result")
+            self.assertEqual(skill_result["result_code"], "INPUT_ACTION_LIMIT")
+            self.assertEqual(skill_result["evidence"]["input_actions"], 2)
         planner = GoalPlanner(self.registry, lambda **_: plan_for(args={"direction": "up", "seconds": 99}))
         with self.assertRaises(PlanningError):
             planner.plan(frame=None, goal="x", profile=self.profile)

@@ -631,6 +631,14 @@ class GoalExecutor:
             return {"status": "ABORT", "result_code": "ABORT",
                     "reason": str(exc)[:300], "evidence": evidence,
                     "duration_seconds": max(0.0, self.clock() - begin)}
+        except InputActionLimitExceeded as exc:
+            evidence = {"failure_stage": "input_action_budget",
+                        "postcondition": "not_checked_budget_exhausted"}
+            if self.input_action_budget is not None:
+                evidence["input_actions"] = self.input_action_budget.actions_used
+            return {"status": SkillStatus.FAILED.value, "result_code": "INPUT_ACTION_LIMIT",
+                    "reason": f"max_actions: {exc}"[:300], "evidence": evidence,
+                    "duration_seconds": max(0.0, self.clock() - begin)}
         return result.model_dump() if hasattr(result, "model_dump") else result
 
     def run(self, goal):
