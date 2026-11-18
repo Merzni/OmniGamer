@@ -152,3 +152,7 @@ PowerShell parser прошёл. `start_all.ps1` подтвердил оба `/he
 ## Повторная проверка исходной hotbar-ошибки (2026-11-18)
 
 После коммита `a531d17` повторён live-frame `run_agent.py --goal "Добудь дерево" --dry-run --window Minecraft --game-id minecraft`. На видимом окне `Minecraft* 26.3` VLM предложила один `click_menu_target` для «Одиночная игра» с непосредственным postcondition `World selection screen appears`; preview подтвердил `main_menu/default`, confidence 0.95, `(848,407)`. Run завершился `DRY_RUN` за 9.46 с, 0/60 вводов. Исходный ошибочный переход к `interact_until_change` по hotbar в этом кадре не воспроизвёлся. Это read-only проверка одного состояния: клик/переход и дальнейший gameplay не проверялись.
+
+## Повторный live dry-run после восстановления сервисов (2026-11-18)
+
+На текущем окне `Minecraft* 26.3` повторён `.venv\Scripts\python.exe run_agent.py --goal "Добудь дерево" --dry-run --window Minecraft --game-id minecraft`. План выбрал `click_menu_target` → «Одиночная игра» (`main_menu/default`); grounding вернул confidence 0.95 и экранную точку `(848,407)`. Run завершился `DRY_RUN` за 5.6 с; `run_finish` записал `vlm_calls=2` (планирование и grounding), `detector_calls=0`, `input_actions=0/60`. Первый вызов через системный Python не стартовал из-за отсутствующей зависимости `rich`, затем штатный `.venv`-запуск завершился успешно. Это подтверждает текущие планирование и target grounding, но не доставку клика, переход меню или игровой успех.
