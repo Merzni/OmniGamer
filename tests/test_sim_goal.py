@@ -91,8 +91,9 @@ class SyntheticGoalPathTests(unittest.TestCase):
                 profile=profile, game_id=profile.game_id, execute_skill=lambda *_: None,
                 frame_provider=lambda: None,
                 stop_check=lambda: (_ for _ in ()).throw(InterruptedError("emergency")))
-            with self.assertRaises(InterruptedError):
-                runner.run("goal")
+            result = runner.run("goal")
+            self.assertEqual(result["status"], "ABORT")
+            self.assertIn("emergency", result["reason"])
         self.assertEqual(calls, [])
 
     def test_lost_target_is_reported_failed(self):

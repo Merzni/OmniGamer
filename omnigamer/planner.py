@@ -401,6 +401,8 @@ class GoalPlanner:
                 request_started = time.monotonic()
                 try:
                     raw = self.request_plan(**request)
+                except InterruptedError:
+                    raise
                 except Exception as exc:
                     detail = f"{type(exc).__name__}: {exc}"[:300]
                     raise PlanningError(f"Goal planner request failed: {detail}") from exc
@@ -543,6 +545,14 @@ class GoalExecutor:
                     "result_code": "UNCONFIRMED", "reason": "success_check_uncertain",
                     "duration_seconds": total_duration,
                     "evidence": {**evidence, "verification": verification}}
+        except InterruptedError as exc:
+            return {**result, "status": "ABORT", "result_code": "ABORT",
+                    "reason": str(exc)[:300],
+                    "duration_seconds": float(result.get("duration_seconds", 0.0)) +
+                        max(0.0, self.clock() - verify_started),
+                    "evidence": {**evidence, "postcondition": "not_checked_emergency_stop",
+                        "verification": {"result": "unknown", "scope": verification_scope,
+                                         "source": "interrupted"}}}
         except Exception as exc:
             return {**result, "status": SkillStatus.UNCONFIRMED.value,
                     "result_code": "UNCONFIRMED", "reason": "success_check_error",
@@ -624,6 +634,14 @@ class GoalExecutor:
         return result.model_dump() if hasattr(result, "model_dump") else result
 
     def run(self, goal):
+        self._steps_used = 0
+        try:
+            return self._run(goal)
+        except InterruptedError as exc:
+            return self._finish({"status": "ABORT", "reason": str(exc)[:300],
+                                 "steps": self._steps_used})
+
+    def _run(self, goal):
         started, steps_used, replans, failure = self.clock(), 0, 0, ""
         avoid_plan, failed_step = None, None
         while True:
@@ -788,6 +806,7 @@ class GoalExecutor:
                     self.logger({"event": "skill_result", "skill": step.skill,
                                  "args": step.args, "result": result})
                 steps_used += 1
+                self._steps_used = steps_used
                 if result.get("result_code") == "MENU_TARGET_PREVIEW_FAILED":
                     return self._finish({"status": SkillStatus.UNCONFIRMED.value,
                                          "reason": result["reason"], "steps": steps_used})
@@ -807,6 +826,7 @@ class GoalExecutor:
                             self._recover_blocked_approach(goal, params["target_text"], started,
                                                            steps_used))
                         steps_used += recovery_steps
+                        self._steps_used = steps_used
                         recovery_approach_ran = recovery_skill == "approach_target"
                         if recovered and recovered.get("status") == SkillStatus.SUCCESS.value:
                             if is_final_step:
