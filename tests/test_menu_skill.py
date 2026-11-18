@@ -178,6 +178,7 @@ class MenuSkillTests(unittest.TestCase):
         class Assessment:
             usable = True
             result = "progress"
+            menu_action_succeeded = True
             confidence = .95
             evidence = "World list appeared"
             evidence_source = "test_fixture"
@@ -200,6 +201,69 @@ class MenuSkillTests(unittest.TestCase):
             self.capture.grab_frame(), self.capture.grab_frame(), 5)
         self.assertEqual(result["status"], SkillStatus.SUCCESS.value)
         self.assertEqual(result["evidence"]["verification"]["scope"], "menu_transition")
+
+    def test_menu_progress_requires_explicit_action_confirmation(self):
+        from omnigamer.planner import PlannedStep
+
+        registry = default_registry(self.profile)
+        planner = GoalPlanner(registry, lambda **_: None)
+        step = PlannedStep(skill="click_menu_target",
+            args={"target_label": "Одиночная игра", "intent": "Open world list",
+                  "expected_result": "world list"},
+            expected_result="world list", success_check="world selection menu is visible")
+        for action_result, expected_status, expected_reason in (
+                (False, SkillStatus.FAILED.value, "menu_action_not_succeeded"),
+                (None, SkillStatus.UNCONFIRMED.value, "menu_action_unconfirmed")):
+            class Assessment:
+                usable = True
+                result = "progress"
+                confidence = .95
+                evidence = "Fixture claims progress without confirmed menu action"
+                evidence_source = "test_fixture"
+                menu_action_succeeded = action_result
+
+            executor = GoalExecutor(planner, registry, SkillOutcomeStore(":memory:"),
+                profile=self.profile, game_id=self.profile.game_id, execute_skill=lambda *_: None,
+                frame_provider=lambda: self.capture.grab_frame(), stop_check=lambda: None,
+                result_verifier=lambda *_: Assessment())
+            result = executor._verify_result(step, {
+                "status": SkillStatus.UNCONFIRMED.value,
+                "result_code": "MENU_ACTION_UNCONFIRMED",
+                "reason": "menu_click_sent_postcondition_pending", "evidence": {}},
+                self.capture.grab_frame(), self.capture.grab_frame(), 5)
+            self.assertEqual(result["status"], expected_status)
+            self.assertEqual(result["reason"], expected_reason)
+            self.assertNotEqual(result["result_code"], "SUCCESS_VERIFIED")
+
+    def test_unusable_menu_progress_remains_unconfirmed(self):
+        from omnigamer.planner import PlannedStep
+
+        class Assessment:
+            usable = False
+            result = "progress"
+            confidence = .1
+            evidence = "Unclear visual inspection"
+            evidence_source = "test_fixture"
+            menu_action_succeeded = None
+
+        registry = default_registry(self.profile)
+        planner = GoalPlanner(registry, lambda **_: None)
+        executor = GoalExecutor(planner, registry, SkillOutcomeStore(":memory:"),
+            profile=self.profile, game_id=self.profile.game_id, execute_skill=lambda *_: None,
+            frame_provider=lambda: self.capture.grab_frame(), stop_check=lambda: None,
+            result_verifier=lambda *_: Assessment())
+        step = PlannedStep(skill="click_menu_target",
+            args={"target_label": "Одиночная игра", "intent": "Open world list",
+                  "expected_result": "world list"},
+            expected_result="world list", success_check="world selection menu is visible")
+        result = executor._verify_result(step, {
+            "status": SkillStatus.UNCONFIRMED.value,
+            "result_code": "MENU_ACTION_UNCONFIRMED",
+            "reason": "menu_click_sent_postcondition_pending", "evidence": {}},
+            self.capture.grab_frame(), self.capture.grab_frame(), 5)
+        self.assertEqual(result["status"], SkillStatus.UNCONFIRMED.value)
+        self.assertEqual(result["reason"], "menu_action_unconfirmed")
+        self.assertNotEqual(result["result_code"], "SUCCESS_VERIFIED")
 
 
 if __name__ == "__main__":

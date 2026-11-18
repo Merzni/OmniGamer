@@ -467,6 +467,7 @@ class VisionBrain:
     def assess(self, before: Image.Image, after: Image.Image, action: Dict, context: str,
                timeout_seconds: Optional[float] = None) -> VisualAssessment:
         """Separate visual critic: no commentary, previous narrative, or success delta."""
+        assessment_started = time.perf_counter()
         self.last_assessment_error = None
         active_profile = getattr(self, "active_profile", None)
         world_adapter = "world_selection" in (getattr(active_profile, "ui_adapters", ()) or ())
@@ -507,12 +508,53 @@ class VisionBrain:
         is_menu=(action.get("scene_type")=="menu" or
                  action.get("action_type")=="click_menu_target")
         if is_menu and action.get("verification_only"):
-            try:return self._inspect_menu(after, profile=active_profile)
+            try:return self._inspect_menu(after, profile=active_profile,
+                                          timeout_seconds=timeout_seconds)
             except Exception as exc:
                 self.last_assessment_error=f"{type(exc).__name__}: {exc}"
                 logger.error("Fallback in VisionBrain.assess at %s (%s): %s", __name__, type(exc).__name__, exc,
                              exc_info=True)
                 return VisualAssessment(uncertainty=self.last_assessment_error[:300])
+        row = (first_world_row(before) if world_adapter
+               and action.get("expected_result") == "world_selected" else None)
+        try:
+            click_x, click_y = float(action.get("x")), float(action.get("y"))
+        except (TypeError, ValueError):
+            click_x = click_y = -1
+        if (is_menu and row and action.get("action_type") in {"click", "double_click"}
+                and row[0] <= click_x <= row[2]
+                and row[1] <= click_y <= row[3]
+                and world_selection_cues(before) == (False, False)
+                and world_selection_cues(after) == (True, True)):
+            # The profile geometry already proves the transition. Keep the
+            # independent after-state inspection, but skip the redundant full
+            # before/after VLM comparison for this narrowly recognized layout.
+            try:
+                remaining = (None if timeout_seconds is None else
+                             max(.01, timeout_seconds - (time.perf_counter() - assessment_started)))
+                independent = self._inspect_menu(after, profile=active_profile,
+                                                  timeout_seconds=remaining)
+            except Exception as exc:
+                self.last_assessment_error = f"{type(exc).__name__}: {exc}"
+                logger.error("Fallback in VisionBrain.assess at %s (%s): %s", __name__,
+                             type(exc).__name__, exc, exc_info=True)
+                return VisualAssessment(uncertainty=self.last_assessment_error[:300])
+            assessment = VisualAssessment(
+                before=FrameFacts(scene="menu", menu_id="world_select", menu_state="no_selection",
+                                  selection_visible=False, play_enabled=False),
+                after=independent.after,
+                result="progress",
+                confidence=min(.9, independent.confidence),
+                evidence="World row outline appeared; Play changed from disabled to enabled. Screen geometry heuristic.",
+                uncertainty="Geometry adapter is layout-specific; causal success still needs the next observation.",
+                menu_action_succeeded=True,
+                evidence_source="screen_geometry",
+            )
+            if not independent.usable:
+                assessment.menu_action_succeeded = None
+                assessment.result = "unknown"
+                assessment.uncertainty = independent.uncertainty
+            return assessment
         if is_menu:
             system=(
                 "You verify MENU transitions from labeled BEFORE/AFTER images and visible controls. "
@@ -594,28 +636,17 @@ class VisionBrain:
                         elif facts.play_enabled is True and facts.selection_visible is True:
                             facts.menu_state="world_selected"
                         else:facts.menu_state="unknown_selection"
-                row=first_world_row(before) if world_adapter and action.get("expected_result")=="world_selected" else None
-                if (row and action.get("action_type") in {"click","double_click"}
-                    and row[0]<=float(action.get("x",-1))<=row[2] and row[1]<=float(action.get("y",-1))<=row[3]
-                    and world_selection_cues(before)==(False,False) and world_selection_cues(after)==(True,True)):
-                    # Explicit UI adapter evidence, not a fabricated model claim.
-                    assessment.before=FrameFacts(scene="menu",menu_id="world_select",menu_state="no_selection",
-                                                selection_visible=False,play_enabled=False)
-                    assessment.after=FrameFacts(scene="menu",menu_id="world_select",menu_state="world_selected",
-                                               selection_visible=True,play_enabled=True)
-                    assessment.menu_action_succeeded=True
-                    assessment.result="progress"
-                    assessment.confidence=.9
-                    assessment.evidence_source="screen_geometry"
-                    assessment.evidence="World row outline appeared; Play changed from disabled to enabled. Screen geometry heuristic."
-                    assessment.uncertainty="Geometry adapter is layout-specific; causal success still needs the next observation."
                 if assessment.menu_action_succeeded is True:
                     # Re-read the result without priming it with the actor's intent.
-                    independent=self._inspect_menu(after, profile=active_profile)
+                    remaining = (None if timeout_seconds is None else
+                                 max(.01, timeout_seconds - (time.perf_counter() - assessment_started)))
+                    independent=self._inspect_menu(after, profile=active_profile,
+                                                   timeout_seconds=remaining)
                     assessment.after=independent.after
                     assessment.confidence=min(assessment.confidence,independent.confidence)
                     if not independent.usable:
                         assessment.menu_action_succeeded=None
+                        assessment.result="unknown"
                         assessment.uncertainty=independent.uncertainty
             return assessment
         except Exception as exc:
@@ -624,7 +655,7 @@ class VisionBrain:
                          exc_info=True)
             return VisualAssessment(uncertainty=self.last_assessment_error[:300])
 
-    def _inspect_menu(self,frame,profile=None):
+    def _inspect_menu(self,frame,profile=None,timeout_seconds=None):
         class MenuView(BaseModel):
             facts:FrameFacts
             confidence:float=Field(ge=0,le=1)
@@ -648,7 +679,9 @@ class VisionBrain:
             {"role":"system","content":prompt},
             {"role":"user","content":[{"type":"image_url","image_url":{
                 "url":self.image_to_base64_data_uri(frame,960)}}]}],
-            "temperature":0,"max_tokens":384,"response_format":fmt},timeout=self.timeout)
+            "temperature":0,"max_tokens":384,"response_format":fmt},
+            timeout=(min(self.timeout, max(.01, float(timeout_seconds)))
+                     if timeout_seconds is not None else self.timeout))
         response.raise_for_status()
         view=MenuView.model_validate_json(response.json()["choices"][0]["message"]["content"])
         facts=view.facts

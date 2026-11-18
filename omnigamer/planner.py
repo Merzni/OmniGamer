@@ -515,6 +515,19 @@ class GoalExecutor:
                         "result_code": "UNCONFIRMED", "reason": "success_check_time_budget_exhausted",
                         "duration_seconds": total_duration,
                         "evidence": {**evidence, "verification": verification}}
+            if verification_scope == "menu_transition" or step.skill == "click_menu_target":
+                menu_action_succeeded = getattr(assessment, "menu_action_succeeded", None)
+                verification["menu_action_succeeded"] = menu_action_succeeded
+                if usable and menu_action_succeeded is False:
+                    return {**result, "status": SkillStatus.FAILED.value,
+                            "result_code": "VERIFICATION_FAILED", "reason": "menu_action_not_succeeded",
+                            "duration_seconds": total_duration,
+                            "evidence": {**evidence, "verification": verification}}
+                if not usable or menu_action_succeeded is not True:
+                    return {**result, "status": SkillStatus.UNCONFIRMED.value,
+                            "result_code": "UNCONFIRMED", "reason": "menu_action_unconfirmed",
+                            "duration_seconds": total_duration,
+                            "evidence": {**evidence, "verification": verification}}
             if usable and verdict == "progress":
                 return {**result, "status": SkillStatus.SUCCESS.value,
                         "result_code": "SUCCESS_VERIFIED", "reason": "success_check_confirmed",

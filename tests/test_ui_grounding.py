@@ -168,19 +168,50 @@ class GroundingTests(unittest.TestCase):
         before,after=self.world_list(False),self.world_list(True)
         action=self.brain._world_list_action(before,BrainDecision(action_type='click',x=500,y=650),button_candidates(before))
         self.assertIsNotNone(action)
-        initial={'before':{'scene':'menu','menu_id':'world_select'},'after':{'scene':'menu','menu_id':'world_select'},
-                 'menu_action_succeeded':False,'confidence':.8,'evidence':'Model missed the selection change.'}
         inspection={'facts':{'scene':'menu','menu_id':'world_select','menu_state':'world_selected',
                             'selection_visible':True,'play_enabled':True},'confidence':.95,'evidence':'A row outline is visible.'}
-        responses=[]
-        for payload in (initial,inspection):
-            response=Mock();response.json.return_value={'choices':[{'message':{'content':json.dumps(payload)}}]};responses.append(response)
-        with patch('omnigamer.vision_brain.requests.post',side_effect=responses) as post:
-            result=self.brain.assess(before,after,action.model_dump(),'Free play')
-        self.assertEqual(post.call_count,2)
+        response=Mock();response.json.return_value={'choices':[{'message':{'content':json.dumps(inspection)}}]}
+        with patch('omnigamer.vision_brain.requests.post',return_value=response) as post:
+            result=self.brain.assess(before,after,action.model_dump(),'Free play',timeout_seconds=60)
+        self.assertEqual(post.call_count,1)
+        self.assertGreater(post.call_args.kwargs['timeout'],50)
+        self.assertLessEqual(post.call_args.kwargs['timeout'],60)
         self.assertTrue(result.menu_action_succeeded)
         self.assertEqual(result.evidence_source,'screen_geometry')
         self.assertEqual(result.after.menu_state,'world_selected')
+        self.assertEqual(len(post.call_args.kwargs['json']['messages'][1]['content']),1)
+
+    def test_missing_click_coordinates_fall_back_to_visual_assessment(self):
+        self.brain.active_profile=load_profile('minecraft')
+        frame=self.world_list(False)
+        action=self.brain._world_list_action(frame,BrainDecision(action_type='click'),button_candidates(frame))
+        action=action.model_copy(update={'x':None,'y':None})
+        payload={'before':{'scene':'menu','menu_id':'world_select','menu_state':'no_selection',
+                           'selection_visible':False,'play_enabled':False},
+                 'after':{'scene':'menu','menu_id':'world_select','menu_state':'no_selection',
+                          'selection_visible':False,'play_enabled':False},
+                 'menu_action_succeeded':False,'result':'blocked','confidence':.95,
+                 'evidence':'The world row remains unselected.','uncertainty':''}
+        response=Mock();response.json.return_value={'choices':[{'message':{'content':json.dumps(payload)}}]}
+        with patch('omnigamer.vision_brain.requests.post',return_value=response) as post:
+            result=self.brain.assess(frame,frame,action.model_dump(),'Free play')
+        self.assertFalse(result.menu_action_succeeded)
+        post.assert_called_once()
+        self.assertIn('You verify MENU transitions',post.call_args.kwargs['json']['messages'][0]['content'])
+
+    def test_unusable_independent_menu_inspection_cannot_preserve_progress(self):
+        self.brain.active_profile=load_profile('minecraft')
+        before,after=self.world_list(False),self.world_list(True)
+        action=self.brain._world_list_action(before,BrainDecision(action_type='click',x=500,y=650),button_candidates(before))
+        inspection={'facts':{'scene':'unknown','menu_id':'unknown','menu_state':'default',
+                             'selection_visible':None,'play_enabled':None},
+                    'confidence':.1,'evidence':'Unclear.'}
+        response=Mock();response.json.return_value={'choices':[{'message':{'content':json.dumps(inspection)}}]}
+        with patch('omnigamer.vision_brain.requests.post',return_value=response):
+            result=self.brain.assess(before,after,action.model_dump(),'Free play')
+        self.assertFalse(result.usable)
+        self.assertEqual(result.result,'unknown')
+        self.assertIsNone(result.menu_action_succeeded)
 
 
 class CameraFeedbackTests(unittest.TestCase):
