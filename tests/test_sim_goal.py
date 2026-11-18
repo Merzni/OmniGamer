@@ -30,13 +30,22 @@ class SyntheticGoalPathTests(unittest.TestCase):
         state = SimState(profile)
         capture, controls, detector = SimCapture(state), SimControls(state), SimDetector(state)
         registry = default_registry()
-        answer = {"steps": [
-            {"skill": "search_target", "args": {"target_text": "marker", "sweep": 3},
-             "expected_result": "marker detected", "success_check": "detector returned a box"},
-            {"skill": "interact_until_change", "args": {
-                "region": next(iter(profile.regions)), "action": next(iter(profile.actions)), "max_repeats": 2},
-             "expected_result": "panel changes", "success_check": "region metric exceeds threshold"},
-        ]}
+        if profile.camera_type == "none":
+            answer = {"steps": [
+                {"skill": "interact_until_change", "args": {
+                    "region": next(iter(profile.regions)), "action": next(iter(profile.actions)),
+                    "max_repeats": 2},
+                 "expected_result": "status strip changes", "success_check": "activation marker is visible"},
+            ]}
+        else:
+            answer = {"steps": [
+                {"skill": "search_target", "args": {"target_text": "marker", "sweep": 3},
+                 "expected_result": "marker detected", "success_check": "detector returned a box"},
+                {"skill": "interact_until_change", "args": {
+                    "region": next(iter(profile.regions)), "action": next(iter(profile.actions)),
+                    "max_repeats": 2},
+                 "expected_result": "panel changes", "success_check": "region metric exceeds threshold"},
+            ]}
         planner = GoalPlanner(registry, lambda **_: answer)
 
         def execute(spec, args, remaining_seconds=None):
@@ -60,16 +69,28 @@ class SyntheticGoalPathTests(unittest.TestCase):
             runner = GoalExecutor(planner, registry, store, profile=profile, game_id=profile.game_id,
                                   execute_skill=execute, frame_provider=capture.grab_frame,
                                   stop_check=lambda: None, result_verifier=verify_visible_result)
-            result = runner.run("find the visible marker and activate it")
+            goal = ("activate the visible status control" if profile.camera_type == "none"
+                    else "find the visible marker and activate it")
+            result = runner.run(goal)
             self.assertEqual(result["status"], "SUCCESS")
             self.assertTrue(state.item)
-            self.assertEqual(state.actions, 2)
-            self.assertEqual(len(store.summary(profile.game_id)), 2)
+            expected_actions = 1 if profile.camera_type == "none" else 2
+            self.assertEqual(state.actions, expected_actions)
+            self.assertEqual(len(store.summary(profile.game_id)), expected_actions)
+            if profile.camera_type == "none":
+                self.assertEqual(detector.calls, 0)
+                self.assertEqual(controls.camera_calls, 0)
+            else:
+                self.assertGreater(detector.calls, 0)
+                self.assertGreater(controls.camera_calls, 0)
             return result
 
     def test_complete_goal_pipeline_with_two_distinct_profiles(self):
-        self.run_profile(make_profile_a())
-        self.run_profile(make_profile_b())
+        profile_a, profile_b = make_profile_a(), make_profile_b()
+        self.assertEqual((profile_a.camera_type, profile_a.input_backend), ("first_person", "native"))
+        self.assertEqual((profile_b.camera_type, profile_b.input_backend), ("none", "window"))
+        self.run_profile(profile_a)
+        self.run_profile(profile_b)
 
     def test_detector_failure_does_not_report_success(self):
         profile = make_profile_a()

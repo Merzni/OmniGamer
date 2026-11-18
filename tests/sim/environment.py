@@ -46,11 +46,13 @@ class SimCapture:
 class SimDetector:
     def __init__(self, state):
         self.state = state
+        self.calls = 0
 
     def health(self):
         return {"ok": True, "model": "sim"}
 
     def detect(self, image, queries, score_min=None, max_boxes=None):
+        self.calls += 1
         if not self.state.detector_available:
             return None
         boxes = []
@@ -66,6 +68,7 @@ class SimControls:
     def __init__(self, state):
         self.state = state
         self.released = 0
+        self.camera_calls = 0
 
     def press_key(self, key, duration):
         self.state.actions += 1
@@ -85,6 +88,7 @@ class SimControls:
             self.state.item = True
 
     def move_camera(self, dx, dy):
+        self.camera_calls += 1
         self.state.actions += 1
         if dx > 0:
             self.state.heading += 1
@@ -119,7 +123,7 @@ def make_profile_a():
 
 def make_profile_b():
     from omnigamer.profiles import GameProfile
-    return GameProfile(game_id="sim-beta", camera_type="first_person",
+    return GameProfile(game_id="sim-beta", camera_type="none", input_backend="window",
         move_keys={"forward": "up", "backward": "down", "left": "left", "right": "right"},
         actions={"activate": {"kind": "key", "value": "enter", "duration": 0.05}},
         regions={"status_strip": {"x1": 0.02, "y1": 0.82, "x2": 0.24, "y2": 0.98}},
