@@ -9,7 +9,9 @@ from omnigamer.skills.approach_target import (
     ApproachTargetSettings, ApproachTargetSkill, action_for_box,
 )
 from omnigamer.detector_client import preprocess_image
+from omnigamer.look import look_counts
 from omnigamer.profiles import GameProfile, load_profile
+from omnigamer.supervision import CameraGuard
 from tools.summarize_run import summarize
 
 
@@ -68,7 +70,8 @@ class FakeControls:
 
 class FakeGuard:
     def filter(self, action):
-        return (dict(action, action_type="look", x=0, y=0), None)
+        x, y = look_counts(action["look_direction"], action["look_amount"])
+        return (dict(action, action_type="look", x=x, y=y), None)
 
     def executed(self, action):
         pass
@@ -99,9 +102,10 @@ class ApproachTargetTests(unittest.TestCase):
         detector = FakeDetector(sequence)
         controls = FakeControls()
         calibration_path = kwargs.pop("calibration_path", self.calibration)
+        camera_guard = kwargs.pop("camera_guard", FakeGuard())
         skill = ApproachTargetSkill(
             capture=capture, target_text="a tree trunk", detector=detector,
-            controls=controls, camera_guard=FakeGuard(), game_id="game:test",
+            controls=controls, camera_guard=camera_guard, game_id="game:test",
             calibration_path=calibration_path, settings=settings or ApproachTargetSettings(),
             **kwargs,
         )
@@ -351,6 +355,27 @@ class ApproachTargetTests(unittest.TestCase):
         self.assertEqual(result.input_actions, 1)
         self.assertEqual(result.impulses, 0)
         self.assertEqual(len([call for call in controls.calls if call[0] == "look"]), 1)
+
+    def test_camera_motion_preserves_guard_per_command_limit(self):
+        settings = ApproachTargetSettings(max_look_counts=200)
+        skill, controls, _ = self.make_skill([[]], settings=settings)
+
+        action = skill._camera("down", 120)
+
+        self.assertEqual(controls.calls, [("look", 0, 60)])
+        self.assertEqual(action["sent_counts"], [0, 60])
+
+    def test_camera_motion_preserves_guard_cumulative_vertical_limit(self):
+        guard = CameraGuard()
+        guard.vertical_offset = 179
+        skill, controls, _ = self.make_skill([[]], settings=ApproachTargetSettings(
+            max_look_counts=200), camera_guard=guard)
+
+        action = skill._camera("down", 120)
+
+        self.assertEqual(controls.calls, [("look", 0, 1)])
+        self.assertEqual(action["sent_counts"], [0, 1])
+        self.assertEqual(guard.vertical_offset, 180)
 
     def test_profile_jump_action_recovers_from_repeated_no_growth_after_side_step(self):
         profile = load_profile("minecraft")

@@ -415,19 +415,34 @@ class ApproachTargetSkill:
         return float(box["y1"]) + margin <= 0.5 <= float(box["y2"]) - margin
 
     def _camera(self, direction, counts):
-        action = {"action_type": "look", "look_direction": direction, "look_amount": "small",
+        action = {"action_type": "look", "look_direction": direction, "look_amount": "large",
                   "x": None, "y": None}
         filtered, reason = self.camera_guard.filter(action)
         if reason and filtered.get("action_type") != "look":
             raise RuntimeError(f"CameraGuard rejected the skill look: {reason}")
         bounded = max(10, min(self.settings.max_look_counts, int(abs(counts))))
-        dx = bounded if direction == "right" else -bounded if direction == "left" else 0
-        dy = -bounded if direction == "up" else bounded if direction == "down" else 0
+        requested_dx = bounded if direction == "right" else -bounded if direction == "left" else 0
+        requested_dy = -bounded if direction == "up" else bounded if direction == "down" else 0
+
+        def honor_guard(requested, allowed):
+            allowed = int(allowed or 0)
+            if not requested or not allowed or requested * allowed < 0:
+                return 0
+            sign = 1 if requested > 0 else -1
+            return sign * min(abs(requested), abs(allowed))
+
+        # CameraGuard returns per-call and accumulated vertical limits. Preserve
+        # those limits when applying calibrated, skill-specific counts.
+        dx = honor_guard(requested_dx, filtered.get("x"))
+        dy = honor_guard(requested_dy, filtered.get("y"))
+        if not dx and not dy:
+            raise RuntimeError(reason or "CameraGuard blocked all requested camera motion")
         filtered.update(x=dx, y=dy)
         self.controls.move_camera(dx, dy)
         self._input_actions += 1
         self.camera_guard.executed(filtered)
         return {"type": "look", "direction": direction, "counts": dx if dx else dy,
+                "guard_reason": reason or None,
                 "sent_counts": [dx, dy]}
 
     def _align_counts(self, error_x):
