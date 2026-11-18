@@ -260,6 +260,8 @@ def main():
                     menu_preview=preview_menu_target if args.dry_run and not args.frame_dir else None,
                     skill_preflight=preflight_mining_skill,
                     skill_context=skill_execution_context,
+                    vlm_request_counter=lambda: getattr(
+                        agent.brain, "telemetry_http_requests", None),
                 )
                 try:
                     result = executor.run(args.goal)

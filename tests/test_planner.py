@@ -77,6 +77,31 @@ class GoalPlannerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             GoalPlan.model_validate({"steps": [step] * 7})
 
+    def test_goal_run_counts_planning_and_postcondition_vlm_requests(self):
+        requests = {"count": 4}
+        registry = default_registry(profile=self.profile)
+
+        def request_plan(**_kwargs):
+            requests["count"] += 1
+            return plan_for()
+
+        def verify(*_args):
+            requests["count"] += 2
+            return ConfirmedAssessment()
+
+        runner = GoalExecutor(GoalPlanner(registry, request_plan), registry,
+            SkillOutcomeStore(":memory:"), profile=self.profile, game_id="sim",
+            execute_skill=lambda *_: SkillResult(status=SkillStatus.SUCCESS,
+                result_code="SUCCESS", reason="input_sent"),
+            frame_provider=lambda: object(), stop_check=lambda: None,
+            result_verifier=verify, max_replans=0,
+            vlm_request_counter=lambda: requests["count"])
+
+        result = runner.run("move")
+
+        self.assertEqual(result["status"], "SUCCESS")
+        self.assertEqual(result["vlm_calls"], 3)
+
     def test_adjacent_search_to_approach_hands_off_selected_target(self):
         profile = self.profile
         registry = default_registry(profile=profile)

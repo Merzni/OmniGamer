@@ -170,11 +170,6 @@ def summarize(run_dir):
     ]
     skill_finishes = [row for row in goal_events if row.get("event") == "skill_result"
                       and (row.get("result") or {}).get("status")]
-    vlm_calls = sum(value for step in steps
-                    for value in [(step.get("decision") or {}).get("vlm_http_requests")]
-                    if _number(value))
-    planner_calls = sum(row.get("request_count", 0) for row in goal_events
-                        if row.get("event") == "plan" and _number(row.get("request_count")))
     uncertain_count = sum((step.get("outcome") or {}).get("status") == "uncertain" for step in steps)
     uncertain_count += sum((row.get("result") or {}).get("result_code") == "UNCONFIRMED"
                            for row in goal_events if row.get("event") == "skill_result")
@@ -195,6 +190,13 @@ def summarize(run_dir):
         detector_calls_line = "  detector_calls_per_success: нет данных для подтверждённого успеха"
     else:
         detector_calls_line = "  detector_calls_per_success: нет подтверждённого успеха"
+    if succeeded and _number(goal_result.get("vlm_calls")):
+        vlm_calls_line = (f"  vlm_calls_per_success: {int(goal_result['vlm_calls'])} HTTP-запросов "
+                          "(полный счётчик VisionBrain за goal-run)")
+    elif succeeded:
+        vlm_calls_line = "  vlm_calls_per_success: нет полного счётчика для подтверждённого успеха"
+    else:
+        vlm_calls_line = "  vlm_calls_per_success: нет подтверждённого успеха"
     lines.extend(["", "Метрики качества (только наблюдаемая телеметрия):",
                   f"  task_success_rate: {task_success}",
                   f"  skill_success_rate: {len(verified_skill_finishes)}/{len(skill_finishes)} "
@@ -205,9 +207,7 @@ def summarize(run_dir):
                   f"  actions_per_success: {goal_result.get('input_actions_used')}"
                   if succeeded and _number(goal_result.get("input_actions_used"))
                   else "  actions_per_success: нет данных для подтверждённого успеха",
-                  f"  vlm_calls_per_success: {vlm_calls + planner_calls} запросов "
-                  f"(шаги: {vlm_calls}; планирование: {planner_calls}; проверки goal не включены)"
-                  if succeeded else "  vlm_calls_per_success: нет подтверждённого успеха",
+                  vlm_calls_line,
                   detector_calls_line,
                   "  target_switch_count: нет данных (нет устойчивого ID цели)",
                   f"  target_lost_count: {lost_count} записей состояния LOST",

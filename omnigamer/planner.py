@@ -457,7 +457,7 @@ class GoalExecutor:
                  max_replans=None, max_steps=None, input_action_budget=None,
                  run_id=None, clock=time.monotonic, result_verifier=None,
                  logger=None, detector=None, menu_preview=None, skill_preflight=None,
-                 skill_context=None):
+                 skill_context=None, vlm_request_counter=None):
         self.planner, self.registry, self.store = planner, registry, outcome_store
         self.profile, self.game_id = profile, game_id
         self.execute_skill, self.frame_provider, self.stop_check = execute_skill, frame_provider, stop_check
@@ -470,11 +470,19 @@ class GoalExecutor:
         self.menu_preview = menu_preview
         self.skill_preflight = skill_preflight
         self.skill_context = skill_context
+        self.vlm_request_counter = vlm_request_counter
         self.memory_reuse_count = 0
         self._detector_calls_start = None
+        self._vlm_requests_start = None
 
     def _detector_call_count(self):
         count = getattr(self.detector, "detect_requests", None)
+        return count if isinstance(count, int) and not isinstance(count, bool) and count >= 0 else None
+
+    def _vlm_request_count(self):
+        if self.vlm_request_counter is None:
+            return None
+        count = self.vlm_request_counter()
         return count if isinstance(count, int) and not isinstance(count, bool) and count >= 0 else None
 
     @staticmethod
@@ -733,6 +741,11 @@ class GoalExecutor:
                           max(0, current_detector_calls - self._detector_calls_start)
                           if current_detector_calls is not None
                           and self._detector_calls_start is not None else None)
+        current_vlm_requests = self._vlm_request_count()
+        result.setdefault("vlm_calls",
+                          max(0, current_vlm_requests - self._vlm_requests_start)
+                          if current_vlm_requests is not None
+                          and self._vlm_requests_start is not None else None)
         if self.input_action_budget is not None:
             result.setdefault("input_actions_used", self.input_action_budget.actions_used)
             result.setdefault("input_actions_limit", self.input_action_budget.max_actions)
@@ -836,6 +849,7 @@ class GoalExecutor:
     def run(self, goal):
         self._steps_used = 0
         self._detector_calls_start = self._detector_call_count()
+        self._vlm_requests_start = self._vlm_request_count()
         try:
             return self._run(goal)
         except InterruptedError as exc:

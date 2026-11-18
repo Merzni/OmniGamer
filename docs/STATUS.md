@@ -1,5 +1,11 @@
 # Текущее состояние
 
+## Полный счётчик HTTP-запросов VLM в goal-режиме (2026-11-18)
+
+Goal-run теперь снимает монотонный счётчик `VisionBrain._post` до/после исполнения и пишет полную разницу как `vlm_calls` в `run_finish`. В него входят запросы plan, grounding, preflight и проверки результата. `tools/summarize_run.py` использует именно это поле для `vlm_calls_per_success`; старые записи без поля показывают отсутствие полного счётчика, а не неполную сумму.
+
+Live-frame dry-run на `Minecraft* 26.3` подтвердил сводку runtime: VLM plan сделал 2 запроса, grounding preview — ещё 1, `run_finish.vlm_calls=3`. План выбрал `click_menu_target` → «Одиночная игра», grounding confidence 0.95, `(848,407)`; `DRY_RUN`, 0 вводов. Тест включает 84 профильных и 371 полный тест; `pyflakes` чист. Поскольку это dry-run, вызовы подтверждены, но игрового успеха нет.
+
 ## Учёт запросов детектора в goal-телеметрии (2026-11-18)
 
 `DetectorClient` считает HTTP-попытки `/detect` после подготовки изображения и непосредственно перед отправкой; health checks не входят в счётчик, а timeout/error после отправки учитывается. `GoalExecutor` записывает per-run разницу в `goal_steps.jsonl` событием `run_finish`. `tools/summarize_run.py` показывает `detector_calls_per_success` только при подтверждённом SUCCESS и числовом значении; для клиентов без счётчика поле `null`, а не выдуманный ноль. 84 профильных теста и полный набор из 370 тестов прошли; `pyflakes` чист. В live menu dry-run detector endpoint работал, но сам menu-план не вызывал `/detect`; реальное значение метрики ещё нужно получить на успешном goal-run.

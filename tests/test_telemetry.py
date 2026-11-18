@@ -273,7 +273,8 @@ class TelemetryTests(unittest.TestCase):
                 "scope": "plan_transition", "duration_seconds": 0.6}}}},
             {"event": "skill_result", "result": {"status": "SUCCESS", "result_code": "SUCCESS_VERIFIED"}},
             {"event": "run_finish", "status": "SUCCESS", "reason": "plan_completed",
-             "input_actions_used": 7, "memory_reuse_count": 2, "detector_calls": 3},
+             "input_actions_used": 7, "memory_reuse_count": 2,
+             "detector_calls": 3, "vlm_calls": 5},
         ]
         (run_dir / "goal_steps.jsonl").write_text(
             "".join(json.dumps(row) + "\n" for row in goal_events), encoding="utf-8")
@@ -300,7 +301,7 @@ class TelemetryTests(unittest.TestCase):
         self.assertIn("skill_success_rate: 1/1 (100.0%)", result.stdout)
         self.assertIn("time_to_success: 60.0 с (длительность всего прогона; прокси)", result.stdout)
         self.assertIn("actions_per_success: 7", result.stdout)
-        self.assertIn("vlm_calls_per_success: 5 запросов (шаги: 4; планирование: 1; проверки goal не включены)",
+        self.assertIn("vlm_calls_per_success: 5 HTTP-запросов (полный счётчик VisionBrain за goal-run)",
                       result.stdout)
         self.assertIn("detector_calls_per_success: 3 запросов", result.stdout)
         self.assertIn("target_switch_count: нет данных (нет устойчивого ID цели)", result.stdout)

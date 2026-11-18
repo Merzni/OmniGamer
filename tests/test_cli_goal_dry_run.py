@@ -47,6 +47,7 @@ class FakeAgent:
         self.telemetry = type("Telemetry", (), {})()
         self.telemetry.directory = FakeAgent.run_dir
         self.telemetry.meta = {"run_id": "run-cli"}
+        self.telemetry_http_requests = 0
         self.emergency_hotkey = FakeHotkey()
         self.ended = None
         self.goal_plan_requests = 0
@@ -54,6 +55,7 @@ class FakeAgent:
         self.game_id = "game:" + self.profile.game_id
         FakeAgent.instance = self
     def plan_goal(self, **kwargs):
+        self.telemetry_http_requests += 1
         return {"steps": [{"skill": "search_target", "args": {"target_text": "target", "sweep": 2},
                            "expected_result": "target detected", "success_check": "detector result"}]}
     def request_goal_plan(self, **kwargs):
@@ -106,6 +108,7 @@ class CliGoalDryRunTests(unittest.TestCase):
             self.assertEqual(events[1]["detector"]["box_count"], 1)
             run_finish = next(row for row in events if row["event"] == "run_finish")
             self.assertEqual(run_finish["detector_calls"], 1)
+            self.assertEqual(run_finish["vlm_calls"], 1)
             self.assertEqual(events[-1]["actions_used"], 0)
             self.assertEqual(events[-1]["max_actions"], 60)
 
