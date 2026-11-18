@@ -152,6 +152,47 @@ class GoalPlannerTests(unittest.TestCase):
         self.assertNotIn("turn", offered)
         self.assertIn("click_menu_target", offered)
 
+    def test_pre_execution_menu_recheck_replans_stale_gameplay_skill(self):
+        profile = GameProfile(game_id="minecraft", camera_type="first_person",
+            ui_adapters=["world_selection", "stacked_main_menu"],
+            actions={"interact": {"kind": "key", "value": "e"}},
+            regions={"hotbar": {"x1": 0.3, "y1": 0.9, "x2": 0.7, "y2": 1}},
+            motion_limits={"max_run_seconds": 30, "max_actions": 5})
+        registry = default_registry(profile)
+        gameplay_frame, menu_frame = Image.new("RGB", (64, 48)), Image.new("RGB", (64, 48), "white")
+        interact_plan = plan_for("interact_until_change", {
+            "region": "hotbar", "action": "interact", "max_repeats": 1})
+        click_plan = {"steps": [{"skill": "click_menu_target", "args": {
+            "target_label": "Одиночная игра", "intent": "Open world list",
+            "expected_result": "World selection screen appears"},
+            "expected_result": "World selection screen appears",
+            "success_check": "world selection menu is visible"}]}
+        requested_frames = []
+
+        def request_plan(**request):
+            requested_frames.append(request["frame"])
+            return interact_plan if len(requested_frames) == 1 else click_plan
+
+        planner = GoalPlanner(registry, request_plan, max_validation_retries=0)
+        frames = iter((gameplay_frame, menu_frame, menu_frame, menu_frame))
+        logs = []
+        runner = GoalExecutor(planner, registry, SkillOutcomeStore(":memory:"), profile=profile,
+            game_id="minecraft", execute_skill=lambda *_: self.fail("stale gameplay skill executed"),
+            frame_provider=lambda: next(frames, menu_frame), stop_check=lambda: None,
+            dry_run=True, logger=logs.append,
+            menu_preview=lambda *_: {"result_code": "TARGET_GROUNDED_PREVIEW",
+                                     "evidence": {"input_actions": 0}})
+
+        with patch("omnigamer.planner.has_profile_menu_layout",
+                   side_effect=lambda frame, _profile: frame is menu_frame):
+            result = runner.run("Open a single-player world")
+
+        self.assertEqual(result["status"], "DRY_RUN")
+        self.assertEqual(requested_frames, [gameplay_frame, menu_frame])
+        self.assertTrue(any(row["event"] == "stale_menu_plan_rejected" for row in logs))
+        would_send = [row for row in logs if row["event"] == "would_send"]
+        self.assertEqual([row["skill"] for row in would_send], ["click_menu_target"])
+
     def test_input_action_budget_caps_real_control_calls(self):
         controls = Mock()
         budget = InputActionBudget(2)

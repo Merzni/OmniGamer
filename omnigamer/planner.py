@@ -704,7 +704,21 @@ class GoalExecutor:
                         return self._finish({"status": "FAILED", "reason": "time_budget_exhausted",
                                              "steps": steps_used})
                     params["timeout"] = min(params["timeout"], available)
-                if self.dry_run:
+                menu_unsafe_after_plan = (
+                    step.skill in MENU_UNSAFE_SKILLS
+                    and has_profile_menu_layout(step_frame, self.profile))
+                if menu_unsafe_after_plan:
+                    result = {"status": SkillStatus.FAILED.value,
+                              "result_code": "STALE_MENU_STATE",
+                              "reason": "menu_appeared_after_plan; unsafe_skill_not_executed",
+                              "evidence": {"failure_stage": "pre_skill_menu_recheck",
+                                           "input_actions": 0,
+                                           "postcondition": "not_checked_no_action_sent"},
+                              "duration_seconds": max(0.0, self.clock() - begin)}
+                    if self.logger:
+                        self.logger({"event": "stale_menu_plan_rejected", "skill": step.skill,
+                                     "reason": result["reason"]})
+                elif self.dry_run:
                     resolved = {"skill": step.skill, "args": params}
                     preview_failed = False
                     if step.skill == "click_menu_target" and self.menu_preview is not None:
