@@ -344,3 +344,7 @@ TOCTOU review выявил, что `GoalPlanner` фильтровал gameplay-�
 ## Воспроизводимость profile-тестов в чистом checkout (2026-11-18)
 
 Аудит Git-зависимостей обнаружил, что `data/` полностью игнорируется, хотя несколько тестов загружали Minecraft-профиль прямо из `data/profiles/`, а README ссылался на игнорируемый `_template.json`. Добавлен синтетический fixture в `tests/fixtures/profiles/`; helper вызывает production loader с временно изолированным profile root для generic cases. Generic-шаблон профиля опубликован в `profiles/_template.json`, инструкции README/DEVELOPMENT обновлены; пользовательские профили и machine-specific window/backend настройки не добавлялись в Git. Полный набор: 354 unittest при принудительно пустом runtime profile directory; `pyflakes` и `git diff --check` прошли. Live-игра не затрагивалась.
+
+## Повторный live dry-run цели в меню (2026-11-18)
+
+Read-only doctor подтвердил VLM health/schema probe, detector health/probe (2 boxes, CUDA FP16) и захват Minecraft 1600×877 за 109.1 мс. Свежий `--goal "Добудь дерево" --dry-run` выбрал один шаг `click_menu_target` по «Одиночная игра» в состоянии `main_menu/default`; confidence 0.95, normalized `(530,438)`, screen `(848,407)`, grounding занял 42.485 с. Результат `DRY_RUN`, 1 шаг, 0/60 вводов. Это подтверждает только выбор menu-перехода текущим планировщиком; клик, загрузка мира и добыча не выполнялись. `OpenInputDesktop` отказал с WinError 5, поэтому live-ввод по-прежнему недоступен.
