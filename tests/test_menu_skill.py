@@ -44,6 +44,12 @@ class MenuSkillTests(unittest.TestCase):
             self.invoke(Mock(return_value=unsafe))
         self.controls.click.assert_not_called()
 
+    def test_unrelated_localized_label_is_rejected_before_click(self):
+        unrelated = self.grounded.model_copy(update={"target_label": "Выйти из игры"})
+        with self.assertRaisesRegex(ValueError, "does not match the requested target"):
+            self.invoke(Mock(return_value=unrelated))
+        self.controls.click.assert_not_called()
+
     def test_localized_menu_transition_cannot_override_requested_result(self):
         unsafe = self.grounded.model_copy(update={"expected_result": "gameplay"})
         with self.assertRaisesRegex(ValueError, "different expected result"):
@@ -84,6 +90,28 @@ class MenuSkillTests(unittest.TestCase):
                 capture=self.capture, controls=self.controls, profile=self.profile,
                 grounder=Mock(return_value=unsafe), prepare_target=Mock(), check_target=Mock())
         self.controls.click.assert_not_called()
+
+    def test_measured_world_row_alias_is_allowed_for_selection_postcondition(self):
+        measured = self.grounded.model_copy(update={
+            "target_label": "visible_world_row", "menu_id": "world_select",
+            "menu_state": "no_selection", "expected_result": "world_selected"})
+        result = click_menu_target("visible existing world", "Select a world",
+            "world_selected", capture=self.capture, controls=self.controls,
+            profile=self.profile, grounder=Mock(return_value=measured),
+            prepare_target=Mock(), check_target=Mock())
+        self.assertEqual(result.result_code, "MENU_ACTION_UNCONFIRMED")
+        self.controls.click.assert_called_once()
+
+    def test_measured_play_alias_requires_selected_world_and_gameplay_postcondition(self):
+        measured = self.grounded.model_copy(update={
+            "target_label": "Play selected world", "menu_id": "world_select",
+            "menu_state": "world_selected", "expected_result": "gameplay"})
+        result = click_menu_target("Play", "Start the selected world", "gameplay",
+            capture=self.capture, controls=self.controls, profile=self.profile,
+            grounder=Mock(return_value=measured), prepare_target=Mock(),
+            check_target=Mock())
+        self.assertEqual(result.result_code, "MENU_ACTION_UNCONFIRMED")
+        self.controls.click.assert_called_once()
 
     def test_window_geometry_change_cancels_click(self):
         self.capture.get_client_rect.side_effect = [

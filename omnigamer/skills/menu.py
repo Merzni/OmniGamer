@@ -31,6 +31,29 @@ def _known_menu_result(value):
     return None
 
 
+def _label_words(value):
+    return re.findall(r"[a-z0-9а-яё]+", str(value).casefold())
+
+
+def _menu_target_matches(requested, grounded, expected_result, profile):
+    requested_words = _label_words(requested)
+    localized_words = _label_words(grounded.target_label)
+    if requested_words and requested_words == localized_words:
+        return True
+
+    if "world_selection" not in profile.ui_adapters:
+        return False
+    result = _known_menu_result(expected_result)
+    localized = " ".join(localized_words)
+    if (localized == "visible world row" and grounded.menu_id == "world_select"
+            and grounded.menu_state == "no_selection" and result == "world_selected"):
+        return True
+    if (localized == "play selected world" and grounded.menu_id == "world_select"
+            and grounded.menu_state == "world_selected" and result == "gameplay"):
+        return True
+    return False
+
+
 class ClickMenuTargetParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
     target_label: str = Field(min_length=1, max_length=80)
@@ -82,6 +105,8 @@ def click_menu_target(target_label, intent, expected_result, *, capture, control
     if adapter_conflict or (requested_result is not None and localized_result is not None
                             and requested_result != localized_result):
         raise ValueError("Localized menu action leads to a different expected result")
+    if not _menu_target_matches(target_label, grounded, expected_result, profile):
+        raise ValueError("Localized menu target does not match the requested target")
     if not (0 <= grounded.x <= 1000 and 0 <= grounded.y <= 1000):
         raise ValueError("Grounded menu coordinates are outside the captured image")
 
