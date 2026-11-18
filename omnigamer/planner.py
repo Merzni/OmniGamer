@@ -226,7 +226,7 @@ class SkillOutcomeStore:
             is_success = result in OUTCOME_SUCCESS_CODES
             item[0] += is_success
             item[2] += result in {SkillStatus.UNCONFIRMED.value, "SUCCESS_REGION_CHANGE",
-                                  "REGION_CHANGE_UNCONFIRMED"}
+                                  "REGION_CHANGE_UNCONFIRMED", "MENU_TARGET_UNCONFIRMED"}
             # Rows are newest first. A later failure, uncertain attempt, or generic
             # command success invalidates the old recipe until a fresh verified result.
             if state_hash is None and not item[4]:
@@ -683,7 +683,8 @@ class GoalExecutor:
                             preview = self.menu_preview(step, step_frame, available)
                             preview = preview.model_dump(mode="json") if hasattr(preview, "model_dump") else preview
                             if not isinstance(preview, dict) or preview.get("result_code") != "TARGET_GROUNDED_PREVIEW":
-                                raise ValueError("Menu preview did not return a grounded target")
+                                reason = preview.get("reason") if isinstance(preview, dict) else ""
+                                raise ValueError(reason or "Menu preview did not return a grounded target")
                             resolved["grounded_target"] = preview
                         except Exception as exc:
                             preview_failed = True

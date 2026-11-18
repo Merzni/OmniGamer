@@ -379,11 +379,14 @@ class GoalPlannerTests(unittest.TestCase):
                          expected_result="near object", success_check="target remains centered")
             store.record("a", "move_pulse", "move", "FAILED", 2, "r2")
             store.record("a", "move_pulse", "move", "SUCCESS_REGION_CHANGE", 3, "r4")
+            store.record("a", "click_menu_target", "menu", "MENU_TARGET_UNCONFIRMED", 4, "r5")
             store.record("b", "move_pulse", "move", "SUCCESS", 1, "r3")
-            self.assertEqual(store.summary("a"), [{"skill": "move_pulse", "target": "move",
-                                                    "successes": 1, "attempts": 3, "uncertain": 1,
-                                                    "success_rate": 0.333,
-                                                    "verified_example": None}])
+            summary = {item["skill"]: item for item in store.summary("a")}
+            self.assertEqual(summary["move_pulse"], {"skill": "move_pulse", "target": "move",
+                "successes": 1, "attempts": 3, "uncertain": 1,
+                "success_rate": 0.333, "verified_example": None})
+            self.assertEqual(summary["click_menu_target"]["uncertain"], 1)
+            self.assertIsNone(summary["click_menu_target"]["verified_example"])
             self.assertEqual((store.summary("b")[0]["successes"],
                               store.summary("b")[0]["attempts"],
                               store.summary("b")[0]["success_rate"]), (0, 1, 0.0))
@@ -631,7 +634,8 @@ class GoalPlannerTests(unittest.TestCase):
                 execute_skill=lambda *_: self.fail("dry-run executed input skill"),
                 frame_provider=lambda: frame, stop_check=lambda: None,
                 dry_run=True, logger=logs.append,
-                menu_preview=lambda *_: (_ for _ in ()).throw(ValueError("target unreadable")))
+                menu_preview=lambda *_: {"result_code": "MENU_TARGET_UNCONFIRMED",
+                    "reason": "menu_target_unconfirmed:ValueError:target unreadable"})
 
             result = executor.run("Добудь дерево")
 

@@ -95,6 +95,7 @@ class GroundingTests(unittest.TestCase):
                for item in images]
         self.assertEqual(sizes[0],(640,351))
         self.assertEqual(sizes[1][0],960)
+        self.assertIn('bbox MUST describe that same numbered rectangle',payload['messages'][0]['content'])
 
     def test_stacked_main_menu_geometry_rejects_incomplete_layout(self):
         boxes=[[340,405,719,470],[340,487,719,551],[340,568,719,633],

@@ -30,6 +30,13 @@ class MenuSkillTests(unittest.TestCase):
             grounder=grounder or Mock(return_value=self.grounded),
             prepare_target=Mock(), check_target=Mock())
 
+    def assert_unconfirmed_without_input(self, result, reason):
+        self.assertEqual(result.result_code, "MENU_TARGET_UNCONFIRMED")
+        self.assertEqual(result.evidence["input_actions"], 0)
+        self.assertEqual(result.evidence["postcondition"], "not_checked_no_action_sent")
+        self.assertIn(reason, result.reason)
+        self.controls.click.assert_not_called()
+
     def test_verified_menu_target_sends_one_click_and_defers_outcome(self):
         result = self.invoke()
         self.controls.click.assert_called_once_with(420, 540, button="left", hold_time=0.08)
@@ -50,29 +57,33 @@ class MenuSkillTests(unittest.TestCase):
         self.assertEqual(prepare.call_count, 2)
         check.assert_called_once()
 
+    def test_emergency_stop_still_propagates_before_grounding(self):
+        with self.assertRaisesRegex(InterruptedError, "emergency stop"):
+            click_menu_target("Одиночная игра", "Open the world list", "World selection screen appears",
+                capture=self.capture, controls=self.controls, profile=self.profile,
+                grounder=Mock(return_value=self.grounded), prepare_target=Mock(), check_target=Mock(),
+                stop_check=Mock(side_effect=InterruptedError("emergency stop")))
+        self.controls.click.assert_not_called()
+
     def test_non_menu_grounding_sends_no_input(self):
         unsafe = self.grounded.model_copy(update={"scene_type": "unknown"})
-        with self.assertRaisesRegex(ValueError, "not confidently grounded"):
-            self.invoke(Mock(return_value=unsafe))
-        self.controls.click.assert_not_called()
+        result = self.invoke(Mock(return_value=unsafe))
+        self.assert_unconfirmed_without_input(result, "not confidently grounded")
 
     def test_unrelated_localized_label_is_rejected_before_click(self):
         unrelated = self.grounded.model_copy(update={"target_label": "Выйти из игры"})
-        with self.assertRaisesRegex(ValueError, "does not match the requested target"):
-            self.invoke(Mock(return_value=unrelated))
-        self.controls.click.assert_not_called()
+        result = self.invoke(Mock(return_value=unrelated))
+        self.assert_unconfirmed_without_input(result, "does not match the requested target")
 
     def test_localized_menu_transition_cannot_override_requested_result(self):
         unsafe = self.grounded.model_copy(update={"expected_result": "gameplay"})
-        with self.assertRaisesRegex(ValueError, "different expected result"):
-            self.invoke(Mock(return_value=unsafe))
-        self.controls.click.assert_not_called()
+        result = self.invoke(Mock(return_value=unsafe))
+        self.assert_unconfirmed_without_input(result, "different expected result")
 
     def test_russian_localized_menu_transition_cannot_override_requested_result(self):
         unsafe = self.grounded.model_copy(update={"expected_result": "Мир выбран"})
-        with self.assertRaisesRegex(ValueError, "different expected result"):
-            self.invoke(Mock(return_value=unsafe))
-        self.controls.click.assert_not_called()
+        result = self.invoke(Mock(return_value=unsafe))
+        self.assert_unconfirmed_without_input(result, "different expected result")
 
     def test_equivalent_russian_world_selection_result_is_accepted(self):
         localized = self.grounded.model_copy(update={
@@ -97,11 +108,10 @@ class MenuSkillTests(unittest.TestCase):
         unsafe = self.grounded.model_copy(update={"menu_id": "world_select",
                                                   "menu_state": "no_selection",
                                                   "expected_result": "world_selected"})
-        with self.assertRaisesRegex(ValueError, "different expected result"):
-            click_menu_target("visible_world_row", "Select a world", "selected state",
-                capture=self.capture, controls=self.controls, profile=self.profile,
-                grounder=Mock(return_value=unsafe), prepare_target=Mock(), check_target=Mock())
-        self.controls.click.assert_not_called()
+        result = click_menu_target("visible_world_row", "Select a world", "selected state",
+            capture=self.capture, controls=self.controls, profile=self.profile,
+            grounder=Mock(return_value=unsafe), prepare_target=Mock(), check_target=Mock())
+        self.assert_unconfirmed_without_input(result, "different expected result")
 
     def test_measured_world_row_alias_is_allowed_for_selection_postcondition(self):
         measured = self.grounded.model_copy(update={
@@ -118,12 +128,11 @@ class MenuSkillTests(unittest.TestCase):
         measured = self.grounded.model_copy(update={
             "target_label": "visible_world_row", "menu_id": "world_select",
             "menu_state": "world_selected", "expected_result": "world_selected"})
-        with self.assertRaisesRegex(ValueError, "does not match the requested target"):
-            click_menu_target("visible_world_row", "Select a world", "world_selected",
-                capture=self.capture, controls=self.controls, profile=self.profile,
-                grounder=Mock(return_value=measured), prepare_target=Mock(),
-                check_target=Mock())
-        self.controls.click.assert_not_called()
+        result = click_menu_target("visible_world_row", "Select a world", "world_selected",
+            capture=self.capture, controls=self.controls, profile=self.profile,
+            grounder=Mock(return_value=measured), prepare_target=Mock(),
+            check_target=Mock())
+        self.assert_unconfirmed_without_input(result, "does not match the requested target")
 
     def test_measured_play_alias_requires_selected_world_and_gameplay_postcondition(self):
         measured = self.grounded.model_copy(update={
@@ -140,19 +149,17 @@ class MenuSkillTests(unittest.TestCase):
         measured = self.grounded.model_copy(update={
             "target_label": "Play selected world", "menu_id": "world_select",
             "menu_state": "no_selection", "expected_result": "gameplay"})
-        with self.assertRaisesRegex(ValueError, "does not match the requested target"):
-            click_menu_target("Play selected world", "Start the selected world", "gameplay",
-                capture=self.capture, controls=self.controls, profile=self.profile,
-                grounder=Mock(return_value=measured), prepare_target=Mock(),
-                check_target=Mock())
-        self.controls.click.assert_not_called()
+        result = click_menu_target("Play selected world", "Start the selected world", "gameplay",
+            capture=self.capture, controls=self.controls, profile=self.profile,
+            grounder=Mock(return_value=measured), prepare_target=Mock(),
+            check_target=Mock())
+        self.assert_unconfirmed_without_input(result, "does not match the requested target")
 
     def test_window_geometry_change_cancels_click(self):
         self.capture.get_client_rect.side_effect = [
             (10, 20, 1010, 820), (11, 20, 1011, 820)]
-        with self.assertRaisesRegex(RuntimeError, "moved/resized"):
-            self.invoke()
-        self.controls.click.assert_not_called()
+        result = self.invoke()
+        self.assert_unconfirmed_without_input(result, "moved/resized")
 
     def test_target_change_during_localization_cancels_stale_click(self):
         before = Image.new("RGB", (1000, 800), (20, 20, 20))
@@ -161,11 +168,10 @@ class MenuSkillTests(unittest.TestCase):
         ImageDraw.Draw(changed).rectangle((250, 350, 600, 580), fill=(220, 220, 220))
         self.capture.grab_frame.side_effect = [before, changed, changed]
 
-        with self.assertRaisesRegex(RuntimeError, "target changed during localization"):
-            self.invoke()
+        result = self.invoke()
 
         self.assertEqual(self.capture.grab_frame.call_count, 2)
-        self.controls.click.assert_not_called()
+        self.assert_unconfirmed_without_input(result, "target changed during localization")
 
     def test_animation_outside_target_patch_does_not_cancel_click(self):
         before = Image.new("RGB", (1000, 800), (20, 20, 20))

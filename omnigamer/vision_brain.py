@@ -367,6 +367,8 @@ class VisionBrain:
             "return candidate_id=0 and a tight bbox [left,top,right,bottom] on 0..1000 of the WHOLE image. "
             "For a missing, disabled or uncertain target use enabled=false or confidence<0.85. "
             "Identify scene/menu from the screenshot independently. "
+            "If candidate_id is greater than zero, bbox MUST describe that same numbered rectangle in the first image, "
+            "not its text or a nearby control; include the rectangle center. If these disagree, correct the bbox or use candidate_id=0. "
             "Choose exactly ONE menu_id, not a slash-separated list: main_menu, world_select, pause_menu, settings, other_menu, unknown. "
             "For main_menu, pause_menu, settings and other_menu, menu_state MUST be default; "
             "selection states apply only to world_select. "
