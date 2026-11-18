@@ -306,16 +306,20 @@ class GoalPlanner:
     def validate(self, raw, profile=None, menu_visible=False, frame=None, goal=""):
         plan = raw if isinstance(raw, GoalPlan) else GoalPlan.model_validate(raw)
         explicit_world_creation = self._goal_explicitly_requests_world_creation(goal)
+        profile_adapters = set(profile.ui_adapters or ()) if profile else set()
+        menu_boxes = (button_candidates(frame) if frame is not None
+                      and ("world_selection" in profile_adapters
+                           or {"world_selection", "stacked_main_menu"} <= profile_adapters)
+                      else None)
         main_menu_layout = bool(
             profile and frame is not None
-            and "world_selection" in (profile.ui_adapters or ())
-            and "stacked_main_menu" in (profile.ui_adapters or ())
-            and stacked_main_menu_layout(button_candidates(frame)))
+            and {"world_selection", "stacked_main_menu"} <= profile_adapters
+            and stacked_main_menu_layout(menu_boxes))
         world_selection_next = None
-        if (profile and frame is not None
-                and "world_selection" in (profile.ui_adapters or ())):
-            selection, play_enabled = world_selection_cues(frame)
-            if selection is False and play_enabled is False and first_world_row(frame):
+        if frame is not None and "world_selection" in profile_adapters:
+            cues = world_selection_cues(frame,menu_boxes)
+            selection, play_enabled = cues
+            if selection is False and play_enabled is False and first_world_row(frame,menu_boxes,cues):
                 world_selection_next = "select_existing_world"
             elif selection is True and play_enabled is True:
                 world_selection_next = "start_selected_world"

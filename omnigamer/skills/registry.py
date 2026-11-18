@@ -200,8 +200,9 @@ def default_registry(profile=None):
                   ("TARGET_DETECTED", "FAILED", "ABORT", "UNCONFIRMED"),
                   60, ("detector", "input", "camera_guard"), execute_search_target),
         SkillSpec("interact_until_change",
-                  "Repeat a bounded configured interaction; if the named screen region stays stable, "
-                  "leave the world outcome uncertain for postcondition verification.",
+                  "Send a bounded configured interaction at the current game input position while monitoring "
+                  "a named screen region for change. The region is observation-only and is not an input target; "
+                  "if it stays stable, leave the world outcome uncertain for postcondition verification.",
                   InteractUntilChangeParams, ("The named region and action exist in the profile.",),
                   ("REGION_CHANGE_UNCONFIRMED", "INTERACTION_OUTCOME_UNCONFIRMED",
                    "SUCCESS_VERIFIED", "FAILED", "ABORT", "UNCONFIRMED"),

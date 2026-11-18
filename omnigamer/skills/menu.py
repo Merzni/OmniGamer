@@ -8,7 +8,7 @@ from PIL import ImageChops
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..vision_brain import BrainDecision
-from ..ui_grounding import first_world_row, world_selection_cues
+from ..ui_grounding import button_candidates, first_world_row, world_selection_cues
 from .contracts import SkillResult, SkillStatus
 
 
@@ -84,10 +84,12 @@ def _target_patch(frame, x, y):
 def _menu_target_is_stable(frame, current_frame, grounded):
     if (grounded.menu_id == "world_select"
             and normalize_menu_label(grounded.target_label) == "visible world row"):
-        before_row = first_world_row(frame)
-        current_row = first_world_row(current_frame)
-        before_state = world_selection_cues(frame)
-        current_state = world_selection_cues(current_frame)
+        before_boxes = button_candidates(frame)
+        current_boxes = button_candidates(current_frame)
+        before_state = world_selection_cues(frame, before_boxes)
+        current_state = world_selection_cues(current_frame, current_boxes)
+        before_row = first_world_row(frame, before_boxes, before_state)
+        current_row = first_world_row(current_frame, current_boxes, current_state)
         return bool(before_row and current_row
                     and before_state == current_state == (False, False)
                     and all(abs(before - current) <= 8

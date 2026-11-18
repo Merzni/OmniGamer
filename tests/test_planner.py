@@ -945,6 +945,11 @@ class GoalPlannerTests(unittest.TestCase):
 
     def test_interaction_skill_requires_profile_action_and_region(self):
         planner = GoalPlanner(self.registry, lambda **_: plan_for())
+        interaction = next(item for item in planner.registry.planner_catalog()
+                           if item["name"] == "interact_until_change")
+        properties = interaction["parameters"]["properties"]
+        self.assertIn("observation-only", properties["region"]["description"].casefold())
+        self.assertIn("current game input position", properties["action"]["description"])
         step = {"steps": [{"skill": "interact_until_change",
                             "args": {"region": "area", "action": "activate", "max_repeats": 1},
                             "expected_result": "screen changes", "success_check": "target disappears"}]}

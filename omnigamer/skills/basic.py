@@ -31,8 +31,10 @@ class TurnParams(BaseModel):
 
 class InteractUntilChangeParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    region: str = Field(min_length=1, max_length=80)
-    action: str = Field(min_length=1, max_length=80)
+    region: str = Field(min_length=1, max_length=80,
+                        description="Observation-only screen region to monitor for change; this does not choose where the action is sent.")
+    action: str = Field(min_length=1, max_length=80,
+                        description="Profile-configured input sent at the current game input position or view target.")
     max_repeats: int = Field(default=3, ge=1, le=10)
 
 

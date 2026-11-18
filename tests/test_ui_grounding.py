@@ -168,6 +168,16 @@ class GroundingTests(unittest.TestCase):
         self.assertTrue(790<play.y<900)
         self.assertEqual(play.expected_result,'gameplay')
 
+    def test_world_list_geometry_can_reuse_candidates_for_the_same_frame(self):
+        from omnigamer.ui_grounding import first_world_row
+        frame=self.world_list(False)
+        boxes=button_candidates(frame)
+        cues=world_selection_cues(frame,boxes)
+        expected_row=first_world_row(frame,boxes,cues)
+        with patch('omnigamer.ui_grounding.button_candidates',side_effect=AssertionError('recomputed')):
+            self.assertEqual(cues,(False,False))
+            self.assertEqual(first_world_row(frame,boxes,cues),expected_row)
+
     def test_explicit_world_creation_target_is_not_replaced_with_existing_row(self):
         frame=self.world_list(False)
         action=BrainDecision(action_type='click',target_label='Создать новый мир',

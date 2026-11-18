@@ -153,13 +153,14 @@ def candidate_cards(frame,boxes):
     return cards
 
 
-def world_selection_cues(frame):
+def world_selection_cues(frame, boxes=None):
     """Recognized world-list layout: muted Play text and actual row outline.
 
     This is a screen geometry adapter, not an API into the game. Unknown layouts
     return no evidence instead of guessing from actor intent or mouse hover.
     """
-    boxes=button_candidates(frame)
+    if boxes is None:
+        boxes=button_candidates(frame)
     bottom=[b for b in boxes if 800<(b[1]+b[3])/2<980]
     play=[b for b in bottom if 220<(b[0]+b[2])/2<480 and 790<(b[1]+b[3])/2<900 and b[2]-b[0]>200]
     if len(bottom)<6 or len(play)!=1:return None,None
@@ -185,14 +186,17 @@ def has_profile_menu_layout(frame, profile):
     adapters = set(getattr(profile, "ui_adapters", ()) or ())
     if not adapters or not hasattr(frame, "convert"):
         return False
-    if "stacked_main_menu" in adapters and stacked_main_menu_layout(button_candidates(frame)):
+    boxes=button_candidates(frame)
+    if "stacked_main_menu" in adapters and stacked_main_menu_layout(boxes):
         return True
-    return "world_selection" in adapters and world_selection_cues(frame) != (None, None)
+    return "world_selection" in adapters and world_selection_cues(frame,boxes) != (None, None)
 
 
-def first_world_row(frame):
+def first_world_row(frame, boxes=None, cues=None):
     """Locate a visible multi-line list entry, only in the recognized list layout."""
-    if world_selection_cues(frame)==(None,None):return None
+    if cues is None:
+        cues=world_selection_cues(frame, boxes)
+    if cues==(None,None):return None
     image=frame.convert("RGB").copy();image.thumbnail((960,960))
     a=np.asarray(image).astype(int);h,w=a.shape[:2]
     white=(a.max(2)-a.min(2)<15)&(a.mean(2)>85)
