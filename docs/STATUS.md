@@ -500,3 +500,11 @@ Freshness guard раньше сравнивал широкую область с
 Кандидаты кнопок и screen cues теперь переиспользуются в world-selection grounding, freshness check, profile detection, валидации плана и post-action проверках. Before и after кадры анализируются независимо; в рамках одного кадра одинаковая сегментация не повторяется. Сравнение helper-пути на одном Minecraft кадре дало 0.717–0.792 с с переиспользованием против 1.356–1.507 с при повторной сегментации, с теми же cues и строкой мира. Последний live preview занял 2.093 с против 4.968–5.125 с в предыдущих прогонах; разница наблюдалась на живой системе и не является контролируемым benchmark.
 
 Описание `interact_until_change.region` явно указывает, что это область наблюдения после ввода, а не точка/цель действия. Конфигурируемый action посылается в текущую позицию игрового ввода; для first-person mining нужен успешный visual preflight на цель под прицелом и остальные требования профиля. Live dry-run снова выбрал `visible_world_row` и завершился `DRY_RUN`: 1 шаг, preview 2.093 с, `0/60` вводов, `vlm_calls=1`, `detector_calls=0`. Никакой игровой ввод не отправлялся; фактическая добыча дерева и проверка mining preflight в игре остаются неподтверждёнными.
+
+## Read-only checkpoint (2026-11-18)
+
+Doctor: Minecraft видим (`1692×848`), окно в foreground, input desktop доступен; VLM health/schema probe OK, detector health OK (CUDA FP16), probe на меню вернул 0 boxes. `SendInput` не вызывался.
+
+Последний goal `--dry-run` (`20261118_123609_4d05f7`) спланировал выбор существующего мира и следующий переход через `Играть в выбранном мире`. Исполнен только preview строки мира `(854,227)`: 2.093 с, `world_select/no_selection`, confidence 0.9, `0/60` вводов, 1 VLM-вызов, 0 detector-вызовов. Игровой переход и mining skills не проверялись.
+
+Read-only census памяти: `quick_check=ok`, 947 experiences, 100 skill outcomes, 0 verified outcomes, 0 goal/play lessons. Подтверждённого live mining-рецепта для повторного использования нет.
