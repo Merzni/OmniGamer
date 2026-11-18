@@ -189,6 +189,12 @@ def summarize(run_dir):
         task_success = "1/1 (100.0%)" if succeeded else "0/1 (0.0%)"
     else:
         task_success = "нет завершённого goal-прогона"
+    if succeeded and _number(goal_result.get("detector_calls")):
+        detector_calls_line = f"  detector_calls_per_success: {int(goal_result['detector_calls'])} запросов"
+    elif succeeded:
+        detector_calls_line = "  detector_calls_per_success: нет данных для подтверждённого успеха"
+    else:
+        detector_calls_line = "  detector_calls_per_success: нет подтверждённого успеха"
     lines.extend(["", "Метрики качества (только наблюдаемая телеметрия):",
                   f"  task_success_rate: {task_success}",
                   f"  skill_success_rate: {len(verified_skill_finishes)}/{len(skill_finishes)} "
@@ -202,7 +208,7 @@ def summarize(run_dir):
                   f"  vlm_calls_per_success: {vlm_calls + planner_calls} запросов "
                   f"(шаги: {vlm_calls}; планирование: {planner_calls}; проверки goal не включены)"
                   if succeeded else "  vlm_calls_per_success: нет подтверждённого успеха",
-                  "  detector_calls_per_success: не измеряется как число вызовов; записаны только задержки отдельных наблюдений",
+                  detector_calls_line,
                   "  target_switch_count: нет данных (нет устойчивого ID цели)",
                   f"  target_lost_count: {lost_count} записей состояния LOST",
                   f"  camera_correction_count: {look_corrections} действий look в журналах навыков",

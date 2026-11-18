@@ -76,6 +76,7 @@ class DetectorClient:
         self.max_boxes = max(1, min(50, int(max_boxes)))
         self.timeout = min(2.0, max(0.1, float(timeout)))
         self.model = None
+        self.detect_requests = 0
 
     def health(self):
         """Return service health metadata, or None when the service is unavailable."""
@@ -102,6 +103,7 @@ class DetectorClient:
                 "max_boxes": self.max_boxes if max_boxes is None else max(1, min(50, int(max_boxes))),
             }
             request_timeout = self.timeout if timeout is None else max(0.05, min(self.timeout, float(timeout)))
+            self.detect_requests += 1
             response = requests.post(f"{self.base_url}/detect", json=payload, timeout=request_timeout)
             response.raise_for_status()
             result = response.json()

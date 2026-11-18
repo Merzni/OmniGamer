@@ -471,6 +471,11 @@ class GoalExecutor:
         self.skill_preflight = skill_preflight
         self.skill_context = skill_context
         self.memory_reuse_count = 0
+        self._detector_calls_start = None
+
+    def _detector_call_count(self):
+        count = getattr(self.detector, "detect_requests", None)
+        return count if isinstance(count, int) and not isinstance(count, bool) and count >= 0 else None
 
     @staticmethod
     def _handoff_target_seed(search_result, target_text):
@@ -723,6 +728,11 @@ class GoalExecutor:
 
     def _finish(self, result):
         result.setdefault("memory_reuse_count", self.memory_reuse_count)
+        current_detector_calls = self._detector_call_count()
+        result.setdefault("detector_calls",
+                          max(0, current_detector_calls - self._detector_calls_start)
+                          if current_detector_calls is not None
+                          and self._detector_calls_start is not None else None)
         if self.input_action_budget is not None:
             result.setdefault("input_actions_used", self.input_action_budget.actions_used)
             result.setdefault("input_actions_limit", self.input_action_budget.max_actions)
@@ -825,6 +835,7 @@ class GoalExecutor:
 
     def run(self, goal):
         self._steps_used = 0
+        self._detector_calls_start = self._detector_call_count()
         try:
             return self._run(goal)
         except InterruptedError as exc:

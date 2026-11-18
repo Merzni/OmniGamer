@@ -26,7 +26,11 @@ class FakeHotkey:
 
 
 class FakeDetector:
+    def __init__(self):
+        self.detect_requests = 0
+
     def detect(self, image, queries, **kwargs):
+        self.detect_requests += 1
         return {"boxes": [{"score": 0.9}], "query": queries[0]}
 
 
@@ -100,6 +104,8 @@ class CliGoalDryRunTests(unittest.TestCase):
                                     events[0]["request_durations_seconds"][0])
             self.assertTrue(events[1]["detector"]["available"])
             self.assertEqual(events[1]["detector"]["box_count"], 1)
+            run_finish = next(row for row in events if row["event"] == "run_finish")
+            self.assertEqual(run_finish["detector_calls"], 1)
             self.assertEqual(events[-1]["actions_used"], 0)
             self.assertEqual(events[-1]["max_actions"], 60)
 

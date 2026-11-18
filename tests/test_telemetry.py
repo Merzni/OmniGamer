@@ -273,7 +273,7 @@ class TelemetryTests(unittest.TestCase):
                 "scope": "plan_transition", "duration_seconds": 0.6}}}},
             {"event": "skill_result", "result": {"status": "SUCCESS", "result_code": "SUCCESS_VERIFIED"}},
             {"event": "run_finish", "status": "SUCCESS", "reason": "plan_completed",
-             "input_actions_used": 7, "memory_reuse_count": 2},
+             "input_actions_used": 7, "memory_reuse_count": 2, "detector_calls": 3},
         ]
         (run_dir / "goal_steps.jsonl").write_text(
             "".join(json.dumps(row) + "\n" for row in goal_events), encoding="utf-8")
@@ -302,6 +302,7 @@ class TelemetryTests(unittest.TestCase):
         self.assertIn("actions_per_success: 7", result.stdout)
         self.assertIn("vlm_calls_per_success: 5 запросов (шаги: 4; планирование: 1; проверки goal не включены)",
                       result.stdout)
+        self.assertIn("detector_calls_per_success: 3 запросов", result.stdout)
         self.assertIn("target_switch_count: нет данных (нет устойчивого ID цели)", result.stdout)
         self.assertIn("repeated_failure_count: 1 шагов с state_repeat/repeat_warning", result.stdout)
         self.assertIn("memory_reuse_count: 2", result.stdout)
